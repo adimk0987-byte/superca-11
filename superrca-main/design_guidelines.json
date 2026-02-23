@@ -1,0 +1,159 @@
+{
+  "identity": {
+    "persona": "E1 - The Anti-AI Designer",
+    "mission": "Create a high-end CA Automation Platform that feels like a powerful, precision tool, not a generic SaaS.",
+    "core_principles": [
+      "Fusion over Imitation: Mix Swiss precision with digital fluidity.",
+      "Emotion First: The user should feel RELIEF and MASTERY.",
+      "Content is King: Data density is beautiful if organized correctly.",
+      "Contrast: Use sharp contrasts to guide attention in complex forms."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "IBM Plex Sans, sans-serif",
+      "weights": ["500", "600", "700"],
+      "usage": "Used for all page titles, section headers, and data metrics. Gives a technical, authoritative feel.",
+      "letter_spacing": "-0.02em"
+    },
+    "body": {
+      "family": "DM Sans, sans-serif",
+      "weights": ["400", "500"],
+      "usage": "Used for all paragraphs, labels, and table data. Optimized for readability at small sizes.",
+      "letter_spacing": "normal"
+    },
+    "mono": {
+      "family": "JetBrains Mono, monospace",
+      "weights": ["400"],
+      "usage": "Used for financial values in grids, transaction IDs, and code-like elements.",
+      "letter_spacing": "-0.01em"
+    }
+  },
+  "colors": {
+    "theme_strategy": "Dual Theme with 'Regulatory' Accents",
+    "light_mode": {
+      "background": "#f8fafc",
+      "surface": "#ffffff",
+      "text_primary": "#0f172a",
+      "text_secondary": "#64748b",
+      "border": "#e2e8f0"
+    },
+    "dark_mode": {
+      "background": "#09090b",
+      "surface": "#18181b",
+      "text_primary": "#f8fafc",
+      "text_secondary": "#a1a1aa",
+      "border": "#27272a"
+    },
+    "accents": {
+      "primary": "#0f172a", 
+      "primary_foreground": "#ffffff",
+      "action": "#f97316",
+      "action_hover": "#ea580c",
+      "success": "#10b981",
+      "danger": "#ef4444",
+      "warning": "#f59e0b",
+      "info": "#3b82f6"
+    }
+  },
+  "layout_strategy": {
+    "dashboard_grid": {
+      "type": "Bento Grid",
+      "columns": "grid-cols-1 md:grid-cols-4 lg:grid-cols-12",
+      "gap": "gap-4 md:gap-6",
+      "rules": "Use col-span-X classes to create asymmetry. Key metrics take 3-4 cols, charts take 6-8 cols."
+    },
+    "spacing_scale": {
+      "section_padding": "py-8 md:py-12",
+      "container_padding": "px-4 md:px-8",
+      "element_gap": "gap-4"
+    },
+    "density": "High density for data tables, spacious for marketing/landing pages."
+  },
+  "components": {
+    "cards": {
+      "style": "Flat with 1px border. No heavy shadows. Subtle hover lift.",
+      "classes": "bg-card border-border border shadow-sm hover:shadow-md transition-all duration-200"
+    },
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-4 py-2 font-medium shadow-sm active:scale-95 transition-transform",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-md px-4 py-2 font-medium"
+    },
+    "inputs": {
+      "style": "Clean, minimal borders. Focus ring should be sharp.",
+      "classes": "bg-background border-input ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    },
+    "status_badges": {
+      "style": "Pill shaped, subtle background, solid text.",
+      "mapping": {
+        "success": "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+        "pending": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+        "error": "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+      }
+    }
+  },
+  "visual_enhancers": {
+    "noise_overlay": {
+      "description": "Use a subtle noise texture on dark backgrounds to prevent banding and add 'paper' feel.",
+      "css": "background-image: url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E\")"
+    },
+    "glassmorphism": "Use sparingly. Only for sticky headers or modal overlays. Backdrop-blur-md."
+  },
+  "motion": {
+    "page_transition": {
+      "initial": { "opacity": 0, "y": 20 },
+      "animate": { "opacity": 1, "y": 0 },
+      "exit": { "opacity": 0, "y": -20 },
+      "transition": { "duration": 0.3, "ease": "easeOut" }
+    },
+    "hover_card": {
+      "whileHover": { "y": -2, "boxShadow": "0 10px 30px -10px rgba(0,0,0,0.1)" }
+    }
+  },
+  "assets": {
+    "images": [
+      {
+        "category": "hero_workspace",
+        "url": "https://images.unsplash.com/photo-1768219565623-501f93ae384b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwyfHxtb2Rlcm4lMjBvZmZpY2UlMjBtaW5pbWFsaXN0JTIwd29ya3NwYWNlJTIwbGFwdG9wJTIwY29mZmVlfGVufDB8fHx8MTc3MTA5ODMzNHww&ixlib=rb-4.1.0&q=85",
+        "description": "Minimalist workspace with laptop and coffee, conveying focus."
+      },
+      {
+        "category": "finance_detail",
+        "url": "https://images.unsplash.com/photo-1611125832047-1d7ad1e8e48f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDV8MHwxfHNlYXJjaHw0fHxmaW5hbmNpYWwlMjBkb2N1bWVudHMlMjB0YXglMjBmb3JtcyUyMHByb2Zlc3Npb25hbHMlMjBwZW4lMjBjYWxjdWxhdG9yfGVufDB8fHx8MTc3MTA5ODMzN3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Close up of calculator and pen, representing traditional accounting tools."
+      },
+      {
+        "category": "office_environment",
+        "url": "https://images.unsplash.com/photo-1750768145390-f0ad18d3e65b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w8NjAzMjh8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjBidXNpbmVzcyUyMHByb2Zlc3Npb25hbHMlMjBtZWV0aW5nJTIwb2ZmaWNlfGVufDB8fHx8MTc3MTA5ODMzNnww&ixlib=rb-4.1.0&q=85",
+        "description": "Modern conference room, professional setting."
+      }
+    ],
+    "icons": {
+      "library": "lucide-react",
+      "style": "Stroke width 1.5px (thin/elegant)",
+      "size": "w-4 h-4 for UI, w-5 h-5 for nav, w-8 h-8 for features"
+    }
+  },
+  "universal_guidelines": [
+    "Do NOT use gradients for backgrounds unless covered by a noise texture.",
+    "Ensure high contrast for all text (WCAG AA).",
+    "All interactive elements MUST have a data-testid attribute.",
+    "Use 'sonner' for all toast notifications.",
+    "Forms should use 'react-hook-form' with 'zod' validation.",
+    "Date pickers must use the Shadcn Calendar component.",
+    "Do not center-align the main app container.",
+    "Use 'grid-cols-subgrid' if nesting grids to maintain alignment."
+  ],
+  "instructions_to_main_agent": {
+    "page_specifics": {
+      "dashboard": "Use a Bento Grid layout. Prioritize 'Action Required' cards (e.g., pending filings).",
+      "itr_filing": "Use a Step-by-Step wizard layout. Clear progress indicators.",
+      "reports": "Use high-density tables with sticky headers. Allow column resizing if possible."
+    },
+    "anti_patterns": [
+      "No generic 'Welcome, User' headers without context.",
+      "No huge empty states - provide 'Get Started' actions instead.",
+      "No default scrollbars - use custom slim scrollbars."
+    ]
+  }
+}
