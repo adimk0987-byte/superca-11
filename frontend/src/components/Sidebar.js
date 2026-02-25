@@ -42,21 +42,11 @@ const menuSections = [
     badge: 'Full AI',
     badgeColor: 'bg-emerald-500',
     items: [
-      { name: 'ITR Filing', icon: Calculator, path: '/itr-filing', badge: '✨' },
-      { name: 'ITR PDF Generator', icon: FileSpreadsheet, path: '/itr-generator', badge: '🔥', highlight: true },
+      { name: 'ITR Filing', icon: Calculator, path: '/itr-generator', badge: '🔥', highlight: true },
       { name: 'GST Returns', icon: FileSpreadsheet, path: '/gst-filing', badge: '✨' },
       { name: 'Tally Entry', icon: Wallet, path: '/tally-entry', badge: '✨' },
       { name: 'TDS Filing', icon: Receipt, path: '/tds-filing', badge: '✨' },
       { name: 'Financial Statements', icon: BarChart3, path: '/financial-statements', badge: '✨' },
-    ]
-  },
-  {
-    title: 'AI-Assisted',
-    badge: 'Hybrid',
-    badgeColor: 'bg-amber-500',
-    items: [
-      { name: 'Payroll', icon: UserCog, path: '/payroll', badge: '⚡' },
-      { name: 'Bookkeeping', icon: BookOpen, path: '/bookkeeping', badge: '⚡' },
     ]
   },
   {
