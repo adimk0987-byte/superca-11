@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import Dashboard from '@/pages/Dashboard';
 import ITRFiling from '@/pages/ITRFiling';
+import ITRGenerator from '@/pages/ITRGenerator';
 import GSTFiling from '@/pages/GSTFiling';
 import GSTNSettings from '@/pages/GSTNSettings';
 import TallyEntry from '@/pages/TallyEntry';
