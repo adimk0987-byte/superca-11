@@ -103,6 +103,14 @@ const AppRoutes = () => {
               }
             />
             <Route
+              path="/itr-generator"
+              element={
+                <ProtectedRoute>
+                  <ITRGenerator />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/gst-filing"
               element={
                 <ProtectedRoute>
