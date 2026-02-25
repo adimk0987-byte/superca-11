@@ -225,7 +225,7 @@ const ITRGenerator = () => {
       <div className="bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-900 rounded-2xl p-8 text-white">
         <div className="flex items-center gap-3 mb-2">
           <Sparkles className="w-8 h-8 text-yellow-400" />
-          <h1 className="text-3xl font-bold">ITR PDF Generator</h1>
+          <h1 className="text-3xl font-bold">ITR Filing</h1>
         </div>
         <p className="text-indigo-200 text-lg">AI-Powered • Editable • Auto-Reconciliation</p>
         
