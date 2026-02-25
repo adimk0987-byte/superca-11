@@ -141,8 +141,14 @@ class ITROrchestrator:
             tax_calc = result["calculations"]["chosen_calculation"]
             final_errors = FinalValidator.validate(standard_data, tax_calc)
             
-            if final_errors:
-                result["errors"].extend(final_errors)
+            # Separate blockers from warnings
+            blockers = [e for e in final_errors if e.get('severity') == 'BLOCKER']
+            warnings = [e for e in final_errors if e.get('severity') != 'BLOCKER']
+            
+            result["warnings"].extend(warnings)
+            
+            if blockers:
+                result["errors"].extend(blockers)
                 result["stage"] = "validation_failed"
                 return result
             
