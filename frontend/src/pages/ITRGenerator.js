@@ -71,11 +71,28 @@ const ITRGenerator = () => {
       
       setCurrentStep(STEPS.RECONCILIATION);
     } catch (err) {
-      setError(err.response?.data?.detail || 'AI extraction failed. Please try again.');
+      setError(err.response?.data?.detail || 'AI extraction failed. Try manual entry instead.');
       setCurrentStep(STEPS.UPLOAD);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Skip to manual entry (skip AI extraction)
+  const handleSkipToManual = () => {
+    setItrForm({
+      form: 'ITR-1',
+      reason: 'Manual entry - User skipped document upload',
+      description: 'ITR-1 (Sahaj) - For individuals with salary/pension and interest income',
+      eligible_forms: ['ITR-1', 'ITR-2']
+    });
+    setReconciliation({
+      confidence_score: 1.0,
+      auto_fixed: [],
+      needs_review: [],
+      reconciled_data: {}
+    });
+    setCurrentStep(STEPS.ITR_FORM_SELECTION);
   };
 
   // ============ STEP 5: TAX CALCULATION ============
