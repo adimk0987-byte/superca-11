@@ -92,20 +92,16 @@ const AppRoutes = () => {
             />
             {/* AI Automation Features */}
             <Route
-              path="/itr-filing"
-              element={
-                <ProtectedRoute>
-                  <ITRFiling />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/itr-generator"
               element={
                 <ProtectedRoute>
                   <ITRGenerator />
                 </ProtectedRoute>
               }
+            />
+            <Route
+              path="/itr-filing"
+              element={<Navigate to="/itr-generator" replace />}
             />
             <Route
               path="/gst-filing"
@@ -136,22 +132,6 @@ const AppRoutes = () => {
               element={
                 <ProtectedRoute>
                   <FinancialStatements />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/payroll"
-              element={
-                <ProtectedRoute>
-                  <Payroll />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/bookkeeping"
-              element={
-                <ProtectedRoute>
-                  <Bookkeeping />
                 </ProtectedRoute>
               }
             />
