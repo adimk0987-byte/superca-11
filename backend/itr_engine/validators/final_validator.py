@@ -57,14 +57,14 @@ class FinalValidator:
                 "fix_hint": "Losses will be carried forward. Ensure this is correct."
             })
         
-        # Check 4: Mandatory fields present
+        # Check 4: Mandatory fields present - WARNING only to allow calculation
         personal = standard_data.get('personal', {})
         if not personal.get('pan'):
             errors.append({
                 "code": "MISSING_PAN",
-                "severity": "BLOCKER",
-                "message": "PAN is mandatory",
-                "fix_hint": "Please provide PAN"
+                "severity": "WARNING",  # Changed from BLOCKER
+                "message": "PAN is not provided",
+                "fix_hint": "Please provide PAN before filing"
             })
         
         # Check 5: Income sources validation
