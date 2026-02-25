@@ -168,7 +168,7 @@ class ErrorDetector:
         deductions = data.get('deductions', {})
         personal = data.get('personal', {})
         
-        # New regime: No deductions allowed (except standard deduction)
+        # New regime: Deductions claimed are just ignored (not a blocker)
         if regime == 'new':
             total_deductions = sum([
                 deductions.get('section_80c', {}).get('amount', 0),
@@ -179,10 +179,10 @@ class ErrorDetector:
             
             if total_deductions > 0:
                 self._add_error(
-                    "DEDUCTIONS_NOT_ALLOWED_NEW_REGIME",
-                    "BLOCKER",
-                    f"Deductions of ₹{total_deductions:,.0f} claimed but new regime doesn't allow deductions",
-                    "Either switch to old regime or remove all deductions except standard deduction",
+                    "DEDUCTIONS_IGNORED_NEW_REGIME",
+                    "INFO",  # Changed from BLOCKER to INFO
+                    f"Deductions of ₹{total_deductions:,.0f} will be ignored in new regime",
+                    "New regime doesn't allow deductions. Consider old regime if deductions are significant.",
                     "deductions"
                 )
         
