@@ -260,6 +260,7 @@ const ITRFiling = () => {
 
       setItrState(ITR_STATES.CALCULATED);
       setTaxCalculation(response.data.calculation);
+      setItrId(response.data.itr_id);  // Save ITR ID for PDF generation
 
     } catch (err) {
       setError(err.response?.data?.detail || 'Tax calculation failed');
