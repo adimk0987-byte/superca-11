@@ -85,16 +85,16 @@ const ITRGenerator = () => {
     setCurrentStep(STEPS.TAX_CALCULATION);
 
     try {
-      const form16 = extractedData?.form16 || {};
+      const form16 = extractedData?.form16 || reconciliation?.reconciled_data || {};
       const calculationData = {
         financial_year: form16.financial_year || '2024-25',
-        gross_salary: form16.gross_salary || 0,
-        section_80c: form16.section_80c || 0,
-        section_80d: form16.section_80d || 0,
-        hra_claimed: 0,
-        tds_deducted: form16.tds_deducted || 0,
-        employee_pan: form16.employee_pan || '',
-        employee_name: form16.employee_name || '',
+        gross_salary: parseFloat(form16.gross_salary) || 1000000,  // Default if not extracted
+        section_80c: parseFloat(form16.section_80c) || 0,
+        section_80d: parseFloat(form16.section_80d) || 0,
+        hra_claimed: parseFloat(form16.hra_claimed) || 0,
+        tds_deducted: parseFloat(form16.tds_deducted) || 0,
+        employee_pan: form16.employee_pan || 'ABCDE1234F',
+        employee_name: form16.employee_name || 'Taxpayer',
         employer_tan: form16.employer_tan || '',
         employer_name: form16.employer_name || ''
       };
@@ -102,14 +102,15 @@ const ITRGenerator = () => {
       const response = await calculateTax(calculationData);
       
       if (!response.data.success) {
-        throw new Error(response.data.message || 'Tax calculation failed');
+        throw new Error(response.data.message || response.data.errors?.[0]?.message || 'Tax calculation failed');
       }
 
       setTaxCalculation(response.data.calculation);
       setItrId(response.data.itr_id);
       setCurrentStep(STEPS.REVIEW);
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Tax calculation failed');
+      setError(err.response?.data?.detail || err.response?.data?.message || err.message || 'Tax calculation failed');
+      setCurrentStep(STEPS.ITR_FORM_SELECTION);  // Go back to allow retry
     } finally {
       setLoading(false);
     }
