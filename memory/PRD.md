@@ -58,6 +58,7 @@ Build a complete ITR PDF Generator with:
 - FY 2024-25 tax slabs
 - Surcharge and cess calculation
 - Regime comparison with savings
+- **Fixed:** Deductions no longer block calculation - auto-selects regime
 
 ### 5. PDF Generator (ReportLab)
 - Cover page with PAN and personal info
@@ -72,6 +73,7 @@ Build a complete ITR PDF Generator with:
 - 7-step wizard: Upload → Extract → Reconcile → ITR Form → Calculate → Review → Download
 - Visual progress tracking
 - Error handling at each step
+- **Manual entry option:** Skip document upload for direct entry
 
 ## API Endpoints
 
