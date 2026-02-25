@@ -103,4 +103,28 @@ export const calculateTax = (form16Data) => api.post('/itr/calculate-tax', form1
 export const getITRHistory = () => api.get('/itr/history');
 export const fileITR = (itrId) => api.post(`/itr/${itrId}/file`);
 
+// ITR PDF Generation
+export const generateITRPdf = async (itrId) => {
+  const response = await api.get(`/itr/${itrId}/generate-pdf`, {
+    responseType: 'blob',
+  });
+  return response;
+};
+
+// ITR Document Processing (Multi-Provider AI)
+export const processITRDocuments = (files) => {
+  const formData = new FormData();
+  files.forEach((file, index) => {
+    formData.append('files', file);
+  });
+  return api.post('/itr/process-documents', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+};
+
+// ITR Calculate with Reconciliation
+export const calculateTaxWithReconciliation = (data) => api.post('/itr/calculate-with-reconciliation', data);
+
 export default api;
