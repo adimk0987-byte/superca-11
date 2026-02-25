@@ -39,19 +39,23 @@ class StandardDataBuilder:
     def build_from_form16(form16_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build standard structure from Form-16 data"""
         
+        # Safe getter for strings that might be None
+        def safe_upper(val):
+            return str(val).upper() if val else ''
+        
         return {
             "personal": {
-                "pan": form16_data.get('employee_pan', '').upper(),
-                "name": form16_data.get('employee_name', ''),
-                "financial_year": form16_data.get('financial_year', '2024-25'),
+                "pan": safe_upper(form16_data.get('employee_pan')),
+                "name": form16_data.get('employee_name') or '',
+                "financial_year": form16_data.get('financial_year') or '2024-25',
                 "source": "form16"
             },
             "income": {
                 "salary": {
                     "gross_salary": float(StandardDataBuilder.clean_amount(form16_data.get('gross_salary'))),
                     "standard_deduction": 50000.0,  # FY 2024-25
-                    "employer_tan": form16_data.get('employer_tan', ''),
-                    "employer_name": form16_data.get('employer_name', ''),
+                    "employer_tan": form16_data.get('employer_tan') or '',
+                    "employer_name": form16_data.get('employer_name') or '',
                     "source": "form16"
                 },
                 "house_property": {
