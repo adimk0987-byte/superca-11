@@ -146,14 +146,31 @@ const ITRGenerator = () => {
       const response = await calculateTax(calculationData);
       
       if (!response.data.success) {
-        throw new Error(response.data.message || response.data.errors?.[0]?.message || 'Tax calculation failed');
+        // Get detailed error message
+        const errorMsg = response.data.errors?.[0]?.message || response.data.message || 'Tax calculation failed';
+        const fixHint = response.data.errors?.[0]?.fix_hint || '';
+        throw new Error(fixHint ? `${errorMsg}. ${fixHint}` : errorMsg);
       }
 
       setTaxCalculation(response.data.calculation);
       setItrId(response.data.itr_id);
       setCurrentStep(STEPS.RESULT);
     } catch (err) {
-      setError(err.response?.data?.detail || err.response?.data?.message || err.message || 'Tax calculation failed');
+      // Get the most detailed error message available
+      let errorMessage = 'Tax calculation failed';
+      if (err.response?.data?.errors?.[0]?.message) {
+        errorMessage = err.response.data.errors[0].message;
+        if (err.response.data.errors[0].fix_hint) {
+          errorMessage += `. Fix: ${err.response.data.errors[0].fix_hint}`;
+        }
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      setError(errorMessage);
       setCurrentStep(STEPS.ITR_FORM_SELECTION);
     } finally {
       setLoading(false);
