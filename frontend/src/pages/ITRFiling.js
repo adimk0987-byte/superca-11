@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, Calculator, AlertTriangle, Edit, Eye, Save, Sparkles, XCircle, User, Briefcase, FileSpreadsheet, Building2, TrendingDown } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Calculator, AlertTriangle, Edit, Eye, Save, Sparkles, XCircle, User, Briefcase, FileSpreadsheet, Building2, TrendingDown, Download, FileCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { uploadForm16, calculateTax } from '@/services/api';
+import { uploadForm16, calculateTax, generateITRPdf, processITRDocuments } from '@/services/api';
 
 // ============ STATE MACHINE (GOLD STANDARD) ============
 const ITR_STATES = {
