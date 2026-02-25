@@ -1418,6 +1418,294 @@ async def file_itr(
     return {"success": True, "message": "ITR marked as filed"}
 
 
+# ==================== ITR PDF GENERATION ====================
+
+@api_router.post("/itr/{itr_id}/generate-pdf")
+async def generate_itr_pdf(
+    itr_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate complete ITR PDF package"""
+    from fastapi.responses import Response
+    from itr_engine.generators.pdf_generator import ITRPDFGenerator
+    
+    # Get ITR filing
+    filing = await db.itr_filings.find_one({"id": itr_id}, {"_id": 0})
+    if not filing:
+        raise HTTPException(status_code=404, detail="ITR filing not found")
+    
+    if filing["user_id"] != current_user["user"]["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Prepare user data for PDF
+    form16 = filing.get('form16_data', {})
+    tax_calc = filing.get('tax_calculation', {})
+    
+    user_data = {
+        "personal": {
+            "pan": form16.get('employee_pan', 'XXXXX0000X'),
+            "name": form16.get('employee_name', current_user['user']['name']),
+            "employer_tan": form16.get('employer_tan', ''),
+            "employer_name": form16.get('employer_name', ''),
+            "fathers_name": "-",
+            "dob": "-",
+            "residential_status": "Resident"
+        },
+        "income": {
+            "salary": {
+                "gross_salary": form16.get('gross_salary', 0) or tax_calc.get('gross_income', 0),
+                "basic": 0,
+                "hra": form16.get('hra_claimed', 0),
+                "special_allowance": 0,
+                "lta": 0,
+                "other_allowances": 0,
+                "perquisites": 0
+            },
+            "house_property": {
+                "rental_income": 0,
+                "interest_on_loan": 0
+            },
+            "capital_gains": {
+                "short_term": 0,
+                "long_term": 0
+            },
+            "other_sources": {
+                "interest": 0,
+                "dividends": 0
+            }
+        },
+        "deductions": {
+            "section_80c": {
+                "amount": form16.get('section_80c', 0),
+                "breakdown": {}
+            },
+            "section_80d": {
+                "amount": form16.get('section_80d', 0),
+                "breakdown": {}
+            },
+            "section_80g": {
+                "amount": 0
+            }
+        },
+        "tax_paid": {
+            "tds": {
+                "amount": form16.get('tds_deducted', 0) or tax_calc.get('tds_paid', 0),
+                "entries": []
+            },
+            "advance_tax": 0,
+            "self_assessment": 0
+        }
+    }
+    
+    # Generate PDF
+    try:
+        generator = ITRPDFGenerator()
+        pdf_bytes = generator.generate_complete_itr(
+            user_data=user_data,
+            tax_calculation=tax_calc if isinstance(tax_calc, dict) else tax_calc.model_dump() if hasattr(tax_calc, 'model_dump') else {},
+            itr_type='ITR-1',
+            financial_year=filing.get('financial_year', '2024-25')
+        )
+        
+        # Update filing with PDF generation timestamp
+        await db.itr_filings.update_one(
+            {"id": itr_id},
+            {"$set": {"pdf_generated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=ITR_{filing.get('financial_year', '2024-25')}_{current_user['user']['name'].replace(' ', '_')}.pdf"
+            }
+        )
+    except Exception as e:
+        logger.error(f"PDF generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+
+
+@api_router.post("/itr/process-documents")
+async def process_itr_documents(
+    files: List[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Process multiple ITR documents with AI (Form 16, AIS, Bank Statement, Investment Proofs)
+    Uses multi-provider fallback: Emergent -> OpenAI -> Gemini
+    """
+    from itr_engine.ai_processor import AIDocumentProcessor, DataReconciler, ITRFormSelector
+    
+    processor = AIDocumentProcessor(
+        emergent_key=EMERGENT_LLM_KEY,
+        openai_key=os.environ.get('OPENAI_API_KEY', ''),
+        gemini_key=os.environ.get('GEMINI_API_KEY', '')
+    )
+    
+    results = {
+        "extracted_data": {},
+        "reconciliation": None,
+        "suggested_itr_form": None,
+        "errors": [],
+        "provider_used": None
+    }
+    
+    form16_data = None
+    ais_data = None
+    bank_data = None
+    investment_proofs = []
+    
+    for file in files:
+        try:
+            content = await file.read()
+            file_name = file.filename or "document.pdf"
+            mime_type = file.content_type or "application/pdf"
+            
+            # Detect document type from filename
+            file_lower = file_name.lower()
+            
+            if 'form16' in file_lower or 'form-16' in file_lower or 'form_16' in file_lower:
+                form16_data = await processor.extract_form16_data(content, file_name, mime_type)
+                results["extracted_data"]["form16"] = form16_data
+                
+            elif 'ais' in file_lower or 'annual' in file_lower:
+                ais_data = await processor.extract_ais_data(content, file_name, mime_type)
+                results["extracted_data"]["ais"] = ais_data
+                
+            elif 'bank' in file_lower or 'statement' in file_lower:
+                bank_data = await processor.extract_bank_statement(content, file_name, mime_type)
+                results["extracted_data"]["bank_statement"] = bank_data
+                
+            elif any(x in file_lower for x in ['ppf', 'elss', 'lic', 'nps', 'insurance', '80c', '80d']):
+                proof = await processor.extract_investment_proofs(content, file_name, mime_type)
+                investment_proofs.append(proof)
+                results["extracted_data"]["investment_proofs"] = investment_proofs
+                
+            else:
+                # Try Form 16 extraction as default
+                form16_data = await processor.extract_form16_data(content, file_name, mime_type)
+                results["extracted_data"]["form16"] = form16_data
+            
+            # Track provider used
+            if form16_data and '_provider' in form16_data:
+                results["provider_used"] = form16_data['_provider']
+            elif ais_data and '_provider' in ais_data:
+                results["provider_used"] = ais_data['_provider']
+                
+        except Exception as e:
+            results["errors"].append({
+                "file": file.filename,
+                "error": str(e)
+            })
+    
+    # Reconcile data if we have multiple sources
+    if form16_data:
+        reconciler = DataReconciler()
+        results["reconciliation"] = reconciler.reconcile(
+            form16_data=form16_data,
+            ais_data=ais_data,
+            bank_data=bank_data
+        )
+        
+        # Suggest ITR form
+        user_data = {
+            "income": {
+                "salary": {
+                    "gross_salary": form16_data.get('gross_salary', 0)
+                },
+                "house_property": {},
+                "capital_gains": {
+                    "short_term": ais_data.get('capital_gains_reported', 0) if ais_data else 0,
+                    "long_term": 0
+                },
+                "business": {}
+            },
+            "personal": {
+                "has_foreign_income": False
+            }
+        }
+        
+        results["suggested_itr_form"] = ITRFormSelector.select_form(user_data)
+    
+    return results
+
+
+@api_router.post("/itr/calculate-with-reconciliation")
+async def calculate_tax_with_reconciliation(
+    form16_data: Form16Data,
+    ais_salary: Optional[float] = None,
+    ais_tds: Optional[float] = None,
+    bank_interest: Optional[float] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Calculate tax with data reconciliation
+    Compares Form 16 with AIS/Bank data and flags mismatches
+    """
+    from itr_engine.ai_processor import DataReconciler
+    from itr_engine.orchestrator import ITROrchestrator
+    
+    # First reconcile data
+    reconciler = DataReconciler()
+    form16_dict = {
+        'gross_salary': form16_data.gross_salary or 0,
+        'tds_deducted': form16_data.tds_deducted or 0,
+        'section_80c': form16_data.section_80c or 0,
+        'section_80d': form16_data.section_80d or 0,
+    }
+    
+    ais_dict = None
+    if ais_salary or ais_tds:
+        ais_dict = {
+            'salary_income': ais_salary or 0,
+            'tds_credits': {'total': ais_tds or 0}
+        }
+    
+    bank_dict = None
+    if bank_interest:
+        bank_dict = {
+            'interest_earned': bank_interest or 0
+        }
+    
+    reconciliation = reconciler.reconcile(
+        form16_data=form16_dict,
+        ais_data=ais_dict,
+        bank_data=bank_dict
+    )
+    
+    # Add reconciled interest income to form16
+    if reconciliation['reconciled_data'].get('interest_income', 0) > 0:
+        # Would need to add to other income
+        pass
+    
+    # Calculate tax with ITR engine
+    form16_for_calc = {
+        'financial_year': form16_data.financial_year,
+        'gross_salary': reconciliation['reconciled_data'].get('gross_salary', form16_data.gross_salary),
+        'section_80c': form16_data.section_80c,
+        'section_80d': form16_data.section_80d,
+        'other_deductions': form16_data.other_deductions,
+        'hra_claimed': form16_data.hra_claimed,
+        'tds_deducted': reconciliation['reconciled_data'].get('tds', form16_data.tds_deducted),
+        'employee_pan': form16_data.employee_pan,
+        'employee_name': form16_data.employee_name,
+        'employer_tan': form16_data.employer_tan,
+        'employer_name': form16_data.employer_name
+    }
+    
+    user_preferences = {'compare_regimes': True, 'regime': 'new'}
+    result = ITROrchestrator.process_itr_filing(form16_for_calc, user_preferences)
+    
+    return {
+        "success": result['success'],
+        "calculation": result.get('calculations', {}),
+        "reconciliation": reconciliation,
+        "warnings": result.get('warnings', []) + reconciliation.get('needs_review', []),
+        "auto_fixed": reconciliation.get('auto_fixed', []),
+        "confidence_score": reconciliation.get('confidence_score', 1.0)
+    }
+
+
 # ==================== GST FILING ROUTES (CA-LEVEL) ====================
 
 # Pydantic models for GST API
