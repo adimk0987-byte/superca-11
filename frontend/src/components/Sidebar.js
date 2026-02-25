@@ -43,6 +43,7 @@ const menuSections = [
     badgeColor: 'bg-emerald-500',
     items: [
       { name: 'ITR Filing', icon: Calculator, path: '/itr-filing', badge: '✨' },
+      { name: 'ITR PDF Generator', icon: FileSpreadsheet, path: '/itr-generator', badge: '🔥', highlight: true },
       { name: 'GST Returns', icon: FileSpreadsheet, path: '/gst-filing', badge: '✨' },
       { name: 'Tally Entry', icon: Wallet, path: '/tally-entry', badge: '✨' },
       { name: 'TDS Filing', icon: Receipt, path: '/tds-filing', badge: '✨' },
