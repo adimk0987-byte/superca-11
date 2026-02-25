@@ -49,6 +49,8 @@ const ITRFiling = () => {
   
   const [validationErrors, setValidationErrors] = useState([]);
   const [taxCalculation, setTaxCalculation] = useState(null);
+  const [itrId, setItrId] = useState(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [error, setError] = useState('');
   const [activeSection, setActiveSection] = useState(null);
   const [processing, setProcessing] = useState(false);
