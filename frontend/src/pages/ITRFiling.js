@@ -821,13 +821,52 @@ const ITRFiling = () => {
           </div>
 
           {/* Start New ITR */}
-          <div className="text-center">
+          <div className="text-center space-y-4">
+            {/* PDF Download Button */}
+            {itrId && (
+              <Button 
+                onClick={async () => {
+                  setDownloadingPdf(true);
+                  try {
+                    const response = await generateITRPdf(itrId);
+                    const url = window.URL.createObjectURL(new Blob([response.data]));
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.setAttribute('download', `ITR_${editedData.personal.financial_year}_${editedData.personal.name.replace(/\s+/g, '_')}.pdf`);
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    window.URL.revokeObjectURL(url);
+                  } catch (err) {
+                    setError('PDF download failed: ' + (err.response?.data?.detail || err.message));
+                  } finally {
+                    setDownloadingPdf(false);
+                  }
+                }}
+                disabled={downloadingPdf}
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-4 text-lg mr-4"
+                data-testid="download-itr-pdf-btn"
+              >
+                {downloadingPdf ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                    Generating PDF...
+                  </>
+                ) : (
+                  <>
+                    <Download size={20} className="mr-2" />
+                    Download ITR PDF
+                  </>
+                )}
+              </Button>
+            )}
             <Button 
               onClick={() => {
                 setItrState(ITR_STATES.IDLE);
                 setUploadedFile(null);
                 setExtractedData(null);
                 setTaxCalculation(null);
+                setItrId(null);
                 setSectionCompletion({
                   personal: false,
                   salary: false,
