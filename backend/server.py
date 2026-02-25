@@ -1438,24 +1438,33 @@ async def generate_itr_pdf(
         raise HTTPException(status_code=403, detail="Not authorized")
     
     # Prepare user data for PDF
-    form16 = filing.get('form16_data', {})
-    tax_calc = filing.get('tax_calculation', {})
+    form16 = filing.get('form16_data', {}) or {}
+    tax_calc = filing.get('tax_calculation', {}) or {}
+    
+    # Helper to safely get numeric values
+    def safe_num(val, default=0):
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except:
+            return default
     
     user_data = {
         "personal": {
-            "pan": form16.get('employee_pan', 'XXXXX0000X'),
-            "name": form16.get('employee_name', current_user['user']['name']),
-            "employer_tan": form16.get('employer_tan', ''),
-            "employer_name": form16.get('employer_name', ''),
+            "pan": form16.get('employee_pan') or 'XXXXX0000X',
+            "name": form16.get('employee_name') or current_user['user']['name'],
+            "employer_tan": form16.get('employer_tan') or '',
+            "employer_name": form16.get('employer_name') or '',
             "fathers_name": "-",
             "dob": "-",
             "residential_status": "Resident"
         },
         "income": {
             "salary": {
-                "gross_salary": form16.get('gross_salary', 0) or tax_calc.get('gross_income', 0),
+                "gross_salary": safe_num(form16.get('gross_salary')) or safe_num(tax_calc.get('gross_income')),
                 "basic": 0,
-                "hra": form16.get('hra_claimed', 0),
+                "hra": safe_num(form16.get('hra_claimed')),
                 "special_allowance": 0,
                 "lta": 0,
                 "other_allowances": 0,
@@ -1476,11 +1485,11 @@ async def generate_itr_pdf(
         },
         "deductions": {
             "section_80c": {
-                "amount": form16.get('section_80c', 0),
+                "amount": safe_num(form16.get('section_80c')),
                 "breakdown": {}
             },
             "section_80d": {
-                "amount": form16.get('section_80d', 0),
+                "amount": safe_num(form16.get('section_80d')),
                 "breakdown": {}
             },
             "section_80g": {
@@ -1488,6 +1497,35 @@ async def generate_itr_pdf(
             }
         },
         "tax_paid": {
+            "tds": {
+                "amount": safe_num(form16.get('tds_deducted')) or safe_num(tax_calc.get('tds_paid')),
+                "entries": []
+            },
+            "advance_tax": 0,
+            "self_assessment": 0
+        }
+    }
+    
+    # Convert tax_calc to proper dict with numeric values
+    tax_calc_clean = {
+        "regime": tax_calc.get('suggested_regime', 'new'),
+        "gross_income": safe_num(tax_calc.get('gross_income')),
+        "standard_deduction": safe_num(tax_calc.get('standard_deduction', 75000)),
+        "total_deductions": safe_num(tax_calc.get('total_deductions')),
+        "taxable_income": safe_num(tax_calc.get('taxable_income_new') if tax_calc.get('suggested_regime') == 'new' else tax_calc.get('taxable_income_old')),
+        "tax_on_income": safe_num(tax_calc.get('new_regime_tax') if tax_calc.get('suggested_regime') == 'new' else tax_calc.get('old_regime_tax')),
+        "surcharge": 0,
+        "cess": safe_num(tax_calc.get('new_regime_tax', 0) * 0.04),
+        "total_tax_liability": safe_num(tax_calc.get('new_regime_tax') if tax_calc.get('suggested_regime') == 'new' else tax_calc.get('old_regime_tax')),
+        "interest_234b": 0,
+        "interest_234c": 0,
+        "tax_already_paid": safe_num(form16.get('tds_deducted')),
+        "tds_paid": safe_num(form16.get('tds_deducted')),
+        "advance_tax_paid": 0,
+        "net_tax_payable": max(0, safe_num(tax_calc.get('new_regime_tax')) - safe_num(form16.get('tds_deducted'))),
+        "refund_due": max(0, safe_num(form16.get('tds_deducted')) - safe_num(tax_calc.get('new_regime_tax'))),
+        "is_refund": safe_num(form16.get('tds_deducted')) > safe_num(tax_calc.get('new_regime_tax'))
+    }
             "tds": {
                 "amount": form16.get('tds_deducted', 0) or tax_calc.get('tds_paid', 0),
                 "entries": []
