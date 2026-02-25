@@ -1296,10 +1296,17 @@ async def calculate_tax(
             'employer_name': form16_data.employer_name
         }
         
-        # User preferences (compare both regimes by default)
+        # Check if deductions exist - use old regime if they do
+        has_deductions = (
+            (form16_data.section_80c or 0) > 0 or
+            (form16_data.section_80d or 0) > 0 or
+            (form16_data.hra_claimed or 0) > 0
+        )
+        
+        # User preferences - auto-select regime based on deductions
         user_preferences = {
             'compare_regimes': True,
-            'regime': 'new'  # Default preference
+            'regime': 'old' if has_deductions else 'new'
         }
         
         # Process through ITR engine
