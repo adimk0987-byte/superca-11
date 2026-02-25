@@ -430,11 +430,70 @@ const ITRGenerator = () => {
             <p className="mt-4 text-indigo-100 text-sm">{itrForm.reason}</p>
           </div>
 
+          {/* Manual Entry Fields (shown when skipped AI extraction) */}
+          {!extractedData?.form16 && (
+            <div className="bg-slate-50 rounded-xl p-6 mb-6 border border-slate-200">
+              <h3 className="font-semibold text-slate-900 mb-4">Enter Your Income Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-600 mb-1">Gross Salary (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g., 1200000"
+                    className="w-full px-4 py-2 border rounded-lg"
+                    onChange={(e) => setReconciliation(prev => ({
+                      ...prev,
+                      reconciled_data: { ...prev?.reconciled_data, gross_salary: e.target.value }
+                    }))}
+                    data-testid="manual-salary-input"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-600 mb-1">TDS Deducted (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g., 100000"
+                    className="w-full px-4 py-2 border rounded-lg"
+                    onChange={(e) => setReconciliation(prev => ({
+                      ...prev,
+                      reconciled_data: { ...prev?.reconciled_data, tds_deducted: e.target.value }
+                    }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-600 mb-1">Section 80C (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g., 150000"
+                    className="w-full px-4 py-2 border rounded-lg"
+                    onChange={(e) => setReconciliation(prev => ({
+                      ...prev,
+                      reconciled_data: { ...prev?.reconciled_data, section_80c: e.target.value }
+                    }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-600 mb-1">Section 80D (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g., 25000"
+                    className="w-full px-4 py-2 border rounded-lg"
+                    onChange={(e) => setReconciliation(prev => ({
+                      ...prev,
+                      reconciled_data: { ...prev?.reconciled_data, section_80d: e.target.value }
+                    }))}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="text-center">
             <Button
               onClick={handleCalculateTax}
               disabled={loading}
               className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-8 py-4"
+              data-testid="calculate-tax-btn"
             >
               {loading ? (
                 <><RefreshCw className="animate-spin mr-2" size={18} /> Calculating...</>
