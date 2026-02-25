@@ -328,6 +328,16 @@ const ITRGenerator = () => {
             {!canProceedToExtract() && (
               <p className="text-amber-600 text-sm mt-2">Please upload Form 16 to continue</p>
             )}
+            
+            {/* Skip to Manual Option */}
+            <div className="mt-4">
+              <button
+                onClick={handleSkipToManual}
+                className="text-slate-500 hover:text-indigo-600 text-sm underline"
+              >
+                Skip document upload → Enter details manually
+              </button>
+            </div>
           </div>
         </div>
       )}
