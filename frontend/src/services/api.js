@@ -105,7 +105,7 @@ export const fileITR = (itrId) => api.post(`/itr/${itrId}/file`);
 
 // ITR PDF Generation
 export const generateITRPdf = async (itrId) => {
-  const response = await api.get(`/itr/${itrId}/generate-pdf`, {
+  const response = await api.post(`/itr/${itrId}/generate-pdf`, {}, {
     responseType: 'blob',
   });
   return response;
