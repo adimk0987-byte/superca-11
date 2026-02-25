@@ -18,7 +18,8 @@ from .tax_engine.tax_calculator import TaxCalculator
 from .tax_engine.regime_comparator import RegimeComparator
 from .validators.final_validator import FinalValidator
 from .generators.itr_json_generator import ITRJSONGenerator
-from .generators.pdf_generator import PDFGenerator
+from .generators.pdf_generator import ITRPDFGenerator
+from .ai_processor import AIDocumentProcessor, DataReconciler, ITRFormSelector
 
 __all__ = [
     'StandardDataBuilder',
@@ -29,5 +30,8 @@ __all__ = [
     'RegimeComparator',
     'FinalValidator',
     'ITRJSONGenerator',
-    'PDFGenerator'
+    'ITRPDFGenerator',
+    'AIDocumentProcessor',
+    'DataReconciler',
+    'ITRFormSelector'
 ]
