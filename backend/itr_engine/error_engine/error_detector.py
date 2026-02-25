@@ -75,25 +75,25 @@ class ErrorDetector:
         """Check personal information errors"""
         personal = data.get('personal', {})
         
-        # PAN validation
+        # PAN validation - WARNING only (allow calculation to proceed)
         pan = personal.get('pan', '')
         if not self._is_valid_pan(pan):
             self._add_error(
                 "INVALID_PAN",
-                "BLOCKER",
-                f"Invalid PAN format: {pan}",
-                "PAN must be in format: AAAAA9999A (5 letters, 4 digits, 1 letter)",
+                "WARNING",  # Changed from BLOCKER - allow calculation
+                f"Invalid PAN format: {pan or 'Not provided'}",
+                "PAN must be in format: AAAAA9999A (5 letters, 4 digits, 1 letter). Please update before filing.",
                 "pan"
             )
         
-        # Name validation
-        name = personal.get('name', '').strip()
+        # Name validation - WARNING only
+        name = personal.get('name', '').strip() if personal.get('name') else ''
         if not name or len(name) < 3:
             self._add_error(
                 "INVALID_NAME",
-                "BLOCKER",
+                "WARNING",  # Changed from BLOCKER - allow calculation
                 "Name is missing or too short",
-                "Please provide full name as per PAN card",
+                "Please provide full name as per PAN card before filing.",
                 "name"
             )
         
@@ -112,7 +112,7 @@ class ErrorDetector:
             elif age > 120:
                 self._add_error(
                     "INVALID_DOB",
-                    "BLOCKER",
+                    "WARNING",  # Changed from BLOCKER
                     "Date of birth seems incorrect (age > 120 years)",
                     "Please verify date of birth",
                     "date_of_birth"
