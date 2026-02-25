@@ -1526,21 +1526,13 @@ async def generate_itr_pdf(
         "refund_due": max(0, safe_num(form16.get('tds_deducted')) - safe_num(tax_calc.get('new_regime_tax'))),
         "is_refund": safe_num(form16.get('tds_deducted')) > safe_num(tax_calc.get('new_regime_tax'))
     }
-            "tds": {
-                "amount": form16.get('tds_deducted', 0) or tax_calc.get('tds_paid', 0),
-                "entries": []
-            },
-            "advance_tax": 0,
-            "self_assessment": 0
-        }
-    }
     
     # Generate PDF
     try:
         generator = ITRPDFGenerator()
         pdf_bytes = generator.generate_complete_itr(
             user_data=user_data,
-            tax_calculation=tax_calc if isinstance(tax_calc, dict) else tax_calc.model_dump() if hasattr(tax_calc, 'model_dump') else {},
+            tax_calculation=tax_calc_clean,
             itr_type='ITR-1',
             financial_year=filing.get('financial_year', '2024-25')
         )
