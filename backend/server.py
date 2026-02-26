@@ -2395,13 +2395,14 @@ async def calculate_gst_complete(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Complete GST Calculation with all components:
-    - Output tax from sales
-    - ITC calculation with eligibility
+    Complete GST Calculation with CA-level detailed reports:
+    - Rate-wise output tax breakdown
+    - ITC calculation with Rule 42/43 reversals
+    - Invoice-level GSTR-2A reconciliation
     - Net tax payable
-    - Reconciliation status
     """
     from gst_engine.calculator import GSTCalculator, GSTReportGenerator
+    from gst_engine.detailed_reports import DetailedReportGenerator
     
     company_id = current_user["company"]["id"]
     
@@ -2428,22 +2429,40 @@ async def calculate_gst_complete(
         sales_data, purchase_data, request.is_interstate
     )
     
-    # Reconciliation summary
-    reconciliation = {
-        'summary': {
-            'total_invoices_in_books': request.purchases_in_books,
-            'total_invoices_in_2a': request.purchases_in_2a,
-            'matched_count': request.matched_purchases,
-            'missing_in_2a_value': request.missing_in_2a_value,
-            'match_percentage': (request.matched_purchases / request.purchases_in_books * 100) if request.purchases_in_books > 0 else 100
-        },
-        'recommendations': []
-    }
+    # Generate detailed reports
+    report_gen = DetailedReportGenerator()
     
-    if request.missing_in_2a_value > 0:
-        reconciliation['recommendations'].append(
-            f"₹{request.missing_in_2a_value:,.0f} ITC at risk. Follow up with vendors."
-        )
+    # Detailed GSTR-2A reconciliation with invoice-level data
+    detailed_reconciliation = report_gen.generate_detailed_reconciliation(
+        purchases_in_books=request.purchases_in_books,
+        purchases_in_2a=request.purchases_in_2a,
+        matched_purchases=request.matched_purchases,
+        missing_in_2a_value=request.missing_in_2a_value,
+        total_itc=request.total_itc
+    )
+    
+    # Detailed GSTR-3B computation
+    detailed_gstr3b = report_gen.generate_detailed_gstr3b(
+        sales_data=sales_data,
+        purchase_data=purchase_data,
+        gst_calculation=gst_calculation,
+        is_interstate=request.is_interstate
+    )
+    
+    # Detailed ITC statement
+    detailed_itc = report_gen.generate_detailed_itc(
+        total_itc=request.total_itc,
+        blocked_itc=request.blocked_itc,
+        reversed_itc=request.reversed_itc
+    )
+    
+    # Basic reconciliation summary for backward compat
+    reconciliation = {
+        'summary': detailed_reconciliation['summary'],
+        'recommendations': detailed_reconciliation['recommendations'],
+        'invoices': detailed_reconciliation['invoices'],
+        'vendor_wise': detailed_reconciliation['vendor_wise']
+    }
     
     # Generate summary
     summary = GSTReportGenerator.generate_summary(
@@ -2467,6 +2486,8 @@ async def calculate_gst_complete(
         'gst_calculation': gst_calculation,
         'reconciliation': reconciliation,
         'summary': summary,
+        'detailed_gstr3b': detailed_gstr3b,
+        'detailed_itc': detailed_itc,
         'status': 'calculated',
         'created_at': datetime.now(timezone.utc).isoformat()
     }
@@ -2478,7 +2499,9 @@ async def calculate_gst_complete(
         'filing_id': filing_id,
         'calculation': gst_calculation,
         'summary': summary,
-        'reconciliation': reconciliation
+        'reconciliation': reconciliation,
+        'detailed_gstr3b': detailed_gstr3b,
+        'detailed_itc': detailed_itc
     }
 
 
