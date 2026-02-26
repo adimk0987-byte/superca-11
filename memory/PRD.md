@@ -1,78 +1,63 @@
 # SuperCA - CA Automation Platform PRD
 
 ## Original Problem Statement
-Run and enhance the existing GST/Tax automation app with CA-level detailed reports and Tally XML export functionality.
-
-## Core Features Implemented
-
-### 1. GST Return Filing (CA-Level)
-- **Manual Entry Mode**: Enter sales, purchase, ITC data directly
-- **AI Mode (Automatic)**: Upload documents for AI extraction
-- **Detailed GSTR-3B Computation**:
-  - Section A: Outward Supplies - Rate-wise Breakdown (5%, 12%, 18%, 28%)
-  - Section B: ITC Calculation with Reversals (Rule 42, Rule 43, Section 17(5))
-  - Net Tax Payable (CGST, SGST, IGST)
-  - HSN Summary
-
-### 2. GSTR-2A Reconciliation (Invoice-Level)
-- Invoice-by-invoice matching with GSTR-2A
-- Vendor-wise ITC at risk analysis
-- Status tracking: Matched, Missing in 2A, Rate mismatch, Wrong HSN, Duplicate, Filed next month
-- Actionable recommendations per vendor
-
-### 3. ITC Statement
-- Total ITC from books
-- Blocked ITC under Section 17(5) with breakdown
-- Reversal calculations (Rule 42, Rule 43)
-- Net eligible ITC computation
-
-### 4. Tally XML Export
-- **New Endpoints**:
-  - POST `/api/tally/generate-xml` - Generate XML from manual vouchers
-  - POST `/api/tally/generate-gst-xml?filing_id=XXX` - Generate XML from GST filing
-- **Complete XML Structure**: Ready for Tally Prime/ERP 9 import
-- **Includes**: Vouchers, Ledger Masters, Party Masters with GSTIN
-- **Summary Report**: Voucher counts, GST ledger summary, net payable
-
-### 5. Additional Features
-- Tally Data Entry & Accounting (Manual/AI OCR modes)
-- ITR Filing
-- TDS Filing
-- Financial Statements
-- Reconciliation Hub
-- Customer Management
-- Smart Alerts
-
-## Tech Stack
-- **Backend**: FastAPI (Python 3.11)
-- **Frontend**: React with Tailwind CSS
-- **Database**: MongoDB (gst_filings_v2 collection)
-- **Auth**: JWT-based authentication
-
-## API Endpoints (Key GST/Tally)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/gst/calculate` | POST | Calculate GST with detailed reports |
-| `/api/gst/filings` | GET | List all GST filings |
-| `/api/gst/{filing_id}/generate-pdf` | POST | Generate PDF report |
-| `/api/tally/generate-xml` | POST | Generate Tally XML from vouchers |
-| `/api/tally/generate-gst-xml` | POST | Generate Tally XML from GST filing |
-
-## Test Results
-- Backend: 100% passing (9/9 API tests)
-- PDF Generation: Working (GSTR-3B, Reconciliation, ITC)
-- Tally XML Generation: Working with summary report
+Run and enhance the existing GST/Tax automation app with:
+1. CA-level detailed GST reports (not just summaries)
+2. GSTR-2A reconciliation with invoice-level data
+3. Ready-to-import Tally XML export
+4. TDS Return Filing with Form 24Q & 26Q
 
 ## What's Been Implemented (Feb 26, 2026)
-1. ✅ Full app deployment from uploaded codebase
-2. ✅ Backend GST calculation with detailed reports
-3. ✅ GSTR-2A reconciliation with invoice-level data
-4. ✅ ITC statement with Rule 42/43 and Section 17(5)
-5. ✅ Tally XML generation endpoint with GST entries
-6. ✅ Summary report for CA verification
+
+### GST Return Filing (CA-Level)
+- ✅ GSTR-3B detailed computation with rate-wise breakdown (5%, 12%, 18%, 28%)
+- ✅ ITC calculation with Rule 42, Rule 43, Section 17(5) reversals
+- ✅ GSTR-2A reconciliation with invoice-level detail
+- ✅ Tally XML export from GST filing
+
+### TDS Return Filing (NEW)
+- ✅ Form 26Q (Non-Salary) - Contractors, Professionals, Rent, Interest
+- ✅ Form 24Q (Salary) - Employee-wise TDS with exemptions
+- ✅ Section-wise summary (194C, 194J, 194I, 194A)
+- ✅ Month-wise TDS deposit tracking
+- ✅ PAN Validation Report (Valid/Invalid/Inactive/Mismatch)
+- ✅ 26AS Reconciliation
+- ✅ TRACES JSON export (ready to upload)
+- ✅ Tally XML export with TDS ledger masters
+
+### API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/tds/calculate` | POST | Calculate TDS with Form 24Q/26Q |
+| `/api/tds/returns` | GET | List all TDS returns |
+| `/api/tds/returns/{id}/tally-xml` | POST | Generate Tally XML |
+| `/api/tds/returns/{id}/traces-json` | POST | Generate TRACES JSON |
+| `/api/tds/generate-sample` | POST | Generate sample TDS data |
+| `/api/gst/calculate` | POST | Calculate GST with detailed reports |
+| `/api/tally/generate-gst-xml` | POST | Generate Tally XML from GST filing |
+
+### Backend Files Added
+- `/app/backend/tds_engine/__init__.py`
+- `/app/backend/tds_engine/calculator.py` - TDS calculation, Form generation, Tally export
+
+### Frontend Pages
+- `/app/frontend/src/pages/TDSFiling.js` - Complete TDS filing UI
+- `/app/frontend/src/pages/GSTFiling.js` - Enhanced with Tally export
+
+## Test Results
+- Backend APIs: 100% working
+- TDS calculation: Working with sample data
+- Form 26Q/24Q generation: Working
+- Tally XML export: Working
+- TRACES JSON export: Working
+
+## Access
+- URL: https://sprint-track-3.preview.emergentagent.com
+- Test User: testca9999@example.com / Test123456
 
 ## Backlog / Future Enhancements
-- P0: Add data-testid to form inputs for better automation
-- P1: Real GSTN API integration
-- P2: Bulk invoice upload for reconciliation
+- P1: Bulk deductee upload via Excel
+- P1: Form 16/16A PDF generation
+- P2: Real GSTN/TRACES API integration
+- P2: Auto-fetch 26AS data
 - P3: WhatsApp vendor reminder integration
