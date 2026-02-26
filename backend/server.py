@@ -3648,11 +3648,20 @@ async def generate_gst_tally_xml(
 ):
     """Generate Tally XML from GST filing data - Complete GST entries."""
     try:
+        logger.info(f"Tally XML request - filing_id: {filing_id}, company_id: {current_user['company']['id']}")
+        
         filing = await db.gst_filings.find_one(
             {"id": filing_id, "company_id": current_user["company"]["id"]},
             {"_id": 0}
         )
+        
         if not filing:
+            # Debug - try without company filter
+            all_filings = await db.gst_filings.find_one({"id": filing_id}, {"_id": 0})
+            if all_filings:
+                logger.info(f"Filing found but company mismatch. Filing company: {all_filings.get('company_id')}")
+            else:
+                logger.info(f"No filing found with id: {filing_id}")
             raise HTTPException(status_code=404, detail="GST filing not found")
         
         period = filing.get('period', '012025')
