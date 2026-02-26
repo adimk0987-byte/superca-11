@@ -54,8 +54,8 @@ class SuperCABackendTester:
         """Test login with provided credentials"""
         try:
             login_data = {
-                "email": "test@itr.com", 
-                "password": "test123"
+                "email": "testca9999@example.com", 
+                "password": "Test123456"
             }
             response = requests.post(f"{self.api_url}/auth/login", json=login_data, timeout=10)
             
@@ -77,10 +77,10 @@ class SuperCABackendTester:
         """Create test user if login fails"""
         try:
             signup_data = {
-                "email": "test@itr.com",
-                "name": "Test User ITR",
-                "password": "test123",
-                "company_name": "Test Company ITR"
+                "email": "testca9999@example.com",
+                "name": "Test CA User",
+                "password": "Test123456",
+                "company_name": "Test CA Firm"
             }
             response = requests.post(f"{self.api_url}/auth/signup", json=signup_data, timeout=10)
             
