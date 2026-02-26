@@ -3659,7 +3659,7 @@ async def generate_gst_tally_xml(
         gstin = filing.get('gstin', '')
         business_name = filing.get('business_name', 'Your Company')
         
-        calc = filing.get('calculation', {})
+        calc = filing.get('gst_calculation', {})
         output_tax = calc.get('output_tax', {})
         itc = calc.get('input_tax_credit', {})
         net_payable = calc.get('net_payable', {})
