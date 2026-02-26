@@ -1,6 +1,6 @@
 """
-ITR PDF Generator Backend API Testing
-Tests all ITR-related endpoints for functionality
+SuperCA GST/Tax Backend API Testing
+Tests all GST filing and Tally export endpoints for functionality
 """
 
 import requests
@@ -10,8 +10,8 @@ import tempfile
 import os
 from datetime import datetime
 
-class ITRBackendTester:
-    def __init__(self, base_url="https://gst-manual-entry.preview.emergentagent.com"):
+class SuperCABackendTester:
+    def __init__(self, base_url="https://sprint-track-3.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.token = None
@@ -19,7 +19,7 @@ class ITRBackendTester:
         self.company_info = None
         self.tests_run = 0
         self.tests_passed = 0
-        self.itr_id = None
+        self.gst_filing_id = None
         self.errors = []
 
     def log_result(self, test_name, success, details=""):
