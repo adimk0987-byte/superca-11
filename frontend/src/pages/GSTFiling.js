@@ -403,11 +403,30 @@ const GSTFiling = () => {
           </div>
 
           {/* AI Mode Badge */}
-          <div className="mt-8 text-center">
+          <div className="mt-8 text-center space-y-4">
             <div className="inline-flex items-center gap-2 bg-gradient-to-r from-violet-100 to-purple-100 px-6 py-3 rounded-full">
               <Sparkles className="text-violet-600" size={20} />
               <span className="font-semibold text-violet-800">AI MODE ACTIVATED</span>
               <span className="text-violet-600 text-sm">Your files will be processed automatically</span>
+            </div>
+            
+            {/* Demo Mode Button */}
+            <div>
+              <button
+                onClick={() => {
+                  // Simulate having files for demo
+                  setFiles({
+                    salesRegister: { name: 'Sales_Register_Jan2025.xlsx' },
+                    purchaseRegister: { name: 'Purchase_Register_Jan2025.xlsx' },
+                    gstr2a: { name: 'GSTR2A_Jan2025.pdf' },
+                    bankStatement: null,
+                    previousReturns: null
+                  });
+                }}
+                className="text-violet-600 hover:text-violet-800 text-sm underline"
+              >
+                Run Demo with Sample Data
+              </button>
             </div>
           </div>
         </div>
