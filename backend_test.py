@@ -460,17 +460,17 @@ class SuperCABackendTester:
         
         # Determine overall result
         if self.tests_passed == self.tests_run:
-            print("🎉 ALL TESTS PASSED! ITR Backend is working correctly.")
+            print("🎉 ALL TESTS PASSED! SuperCA GST Backend is working correctly.")
             return 0
         elif self.tests_passed >= self.tests_run * 0.7:  # 70% threshold
             print("⚠️ MOSTLY WORKING - Some issues found but core functionality works.")
             return 0
         else:
-            print("❌ MAJOR ISSUES - ITR Backend has significant problems.")
+            print("❌ MAJOR ISSUES - SuperCA GST Backend has significant problems.")
             return 1
 
 def main():
-    tester = ITRBackendTester()
+    tester = SuperCABackendTester()
     return tester.run_all_tests()
 
 if __name__ == "__main__":
