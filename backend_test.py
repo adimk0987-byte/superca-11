@@ -698,6 +698,16 @@ class SuperCABackendTester:
         self.test_tally_voucher_generation()
         self.test_dashboard_stats()
         
+        # Step 4: TDS-specific endpoints
+        print("🔍 Testing TDS Return Filing endpoints...")
+        print()
+        
+        self.test_tds_sample_generation()
+        self.test_tds_download_templates()
+        self.test_tds_calculation()
+        self.test_tds_tally_xml_export()
+        self.test_tds_traces_json_export()
+        
         return self.print_summary()
 
     def print_summary(self):
