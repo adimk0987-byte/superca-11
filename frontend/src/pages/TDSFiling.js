@@ -295,8 +295,137 @@ const TDSFiling = () => {
             </div>
           </div>
 
+          {/* Upload Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Deductees Upload */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <Building className="text-blue-600" size={24} />
+                <h3 className="font-bold text-slate-900">Upload Non-Salary Deductees (Form 26Q)</h3>
+              </div>
+              <p className="text-sm text-slate-600 mb-4">
+                Upload Excel with contractor, professional, rent & interest payments
+              </p>
+              
+              <div className="space-y-3">
+                <Button 
+                  onClick={() => downloadTemplate('deductees')}
+                  variant="outline"
+                  className="w-full justify-start"
+                  data-testid="download-deductee-template-btn"
+                >
+                  <Download size={16} className="mr-2" />
+                  Download Template (Deductees)
+                </Button>
+                
+                <input
+                  type="file"
+                  ref={deducteeFileRef}
+                  accept=".xlsx,.xls"
+                  onChange={(e) => handleFileUpload(e, 'deductees')}
+                  className="hidden"
+                  data-testid="deductee-file-input"
+                />
+                
+                <Button 
+                  onClick={() => deducteeFileRef.current?.click()}
+                  disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  data-testid="upload-deductee-btn"
+                >
+                  <FileUp size={16} className="mr-2" />
+                  {loading ? 'Uploading...' : 'Upload Deductees Excel'}
+                </Button>
+                
+                {formData.deductees.length > 0 && (
+                  <div className="p-3 bg-blue-50 rounded-lg text-sm">
+                    <div className="flex justify-between text-blue-800">
+                      <span>Loaded:</span>
+                      <span className="font-semibold">{formData.deductees.length} deductees</span>
+                    </div>
+                    <div className="flex justify-between text-blue-600 mt-1">
+                      <span>194C:</span><span>{formData.deductees.filter(d => d.section === '194C').length}</span>
+                      <span>194J:</span><span>{formData.deductees.filter(d => d.section === '194J').length}</span>
+                      <span>194I:</span><span>{formData.deductees.filter(d => d.section === '194I').length}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Employees Upload */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <Users className="text-green-600" size={24} />
+                <h3 className="font-bold text-slate-900">Upload Salary Employees (Form 24Q)</h3>
+              </div>
+              <p className="text-sm text-slate-600 mb-4">
+                Upload Excel with employee salary details & exemptions
+              </p>
+              
+              <div className="space-y-3">
+                <Button 
+                  onClick={() => downloadTemplate('employees')}
+                  variant="outline"
+                  className="w-full justify-start"
+                  data-testid="download-employee-template-btn"
+                >
+                  <Download size={16} className="mr-2" />
+                  Download Template (Employees)
+                </Button>
+                
+                <input
+                  type="file"
+                  ref={employeeFileRef}
+                  accept=".xlsx,.xls"
+                  onChange={(e) => handleFileUpload(e, 'employees')}
+                  className="hidden"
+                  data-testid="employee-file-input"
+                />
+                
+                <Button 
+                  onClick={() => employeeFileRef.current?.click()}
+                  disabled={loading}
+                  className="w-full bg-green-600 hover:bg-green-700"
+                  data-testid="upload-employee-btn"
+                >
+                  <FileUp size={16} className="mr-2" />
+                  {loading ? 'Uploading...' : 'Upload Employees Excel'}
+                </Button>
+                
+                {formData.employees.length > 0 && (
+                  <div className="p-3 bg-green-50 rounded-lg text-sm">
+                    <div className="flex justify-between text-green-800">
+                      <span>Loaded:</span>
+                      <span className="font-semibold">{formData.employees.length} employees</span>
+                    </div>
+                    <div className="flex justify-between text-green-600 mt-1">
+                      <span>Total Monthly Salary:</span>
+                      <span>{fmt(formData.employees.reduce((sum, e) => sum + e.monthly_salary, 0))}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Upload Errors */}
+          {uploadErrors.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <h4 className="font-semibold text-amber-900 mb-2 flex items-center gap-2">
+                <AlertTriangle size={18} />
+                Upload Warnings ({uploadErrors.length})
+              </h4>
+              <ul className="space-y-1 text-sm text-amber-800 max-h-32 overflow-y-auto">
+                {uploadErrors.map((err, idx) => (
+                  <li key={idx}>• {err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Data Summary */}
-          {formData.deductees.length > 0 && (
+          {(formData.deductees.length > 0 || formData.employees.length > 0) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white rounded-2xl border border-slate-200 p-6">
                 <div className="flex items-center gap-3 mb-4">
