@@ -3453,6 +3453,533 @@ Ensure debit and credit totals match (balanced trial balance). Use 0 for empty b
                 pass
 
 
+# ==================== FINANCIAL STATEMENTS ENGINE ====================
+
+class FinancialScheduleInput(BaseModel):
+    schedule_type: str  # share_capital, reserves, fixed_assets, inventory, debtors, creditors
+    data: dict
+
+class FinancialStatementRequest(BaseModel):
+    company_name: str
+    financial_year: str
+    period_end_date: str
+    trial_balance: List[dict]
+    previous_year_data: Optional[dict] = None
+    schedules: Optional[dict] = None
+
+@api_router.post("/financial/parse-excel")
+async def parse_excel_trial_balance(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Rule-based parsing of Excel trial balance (no AI needed)"""
+    temp_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os_module.path.splitext(file.filename)[1]) as temp_file:
+            contents = await file.read()
+            temp_file.write(contents)
+            temp_file_path = temp_file.name
+        
+        from openpyxl import load_workbook
+        
+        wb = load_workbook(temp_file_path, data_only=True)
+        ws = wb.active
+        
+        accounts = []
+        company_name = None
+        total_debit = 0
+        total_credit = 0
+        
+        # Try to find header row
+        header_row = None
+        for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=20), 1):
+            row_values = [str(cell.value).lower() if cell.value else '' for cell in row]
+            if any('account' in v or 'particulars' in v or 'ledger' in v for v in row_values):
+                header_row = row_idx
+                break
+            # Check if first row has company name
+            if row_idx == 1 and row[0].value and 'ltd' in str(row[0].value).lower():
+                company_name = str(row[0].value)
+        
+        if not header_row:
+            header_row = 1
+        
+        # Determine column indices
+        col_map = {'name': 0, 'debit': -1, 'credit': -1}
+        for col_idx, cell in enumerate(ws[header_row]):
+            val = str(cell.value).lower() if cell.value else ''
+            if 'account' in val or 'particulars' in val or 'ledger' in val or 'name' in val:
+                col_map['name'] = col_idx
+            elif 'debit' in val or 'dr' in val:
+                col_map['debit'] = col_idx
+            elif 'credit' in val or 'cr' in val:
+                col_map['credit'] = col_idx
+        
+        # If debit/credit columns not found, assume columns B and C
+        if col_map['debit'] == -1:
+            col_map['debit'] = 1
+        if col_map['credit'] == -1:
+            col_map['credit'] = 2
+        
+        # Parse data rows
+        for row_idx, row in enumerate(ws.iter_rows(min_row=header_row + 1), header_row + 1):
+            name_cell = row[col_map['name']] if col_map['name'] < len(row) else None
+            debit_cell = row[col_map['debit']] if col_map['debit'] < len(row) else None
+            credit_cell = row[col_map['credit']] if col_map['credit'] < len(row) else None
+            
+            account_name = str(name_cell.value).strip() if name_cell and name_cell.value else None
+            if not account_name or account_name.lower() in ['total', 'grand total', '', 'none']:
+                continue
+            
+            debit = 0
+            credit = 0
+            
+            if debit_cell and debit_cell.value:
+                try:
+                    debit = float(str(debit_cell.value).replace(',', '').replace('₹', '').strip())
+                except:
+                    debit = 0
+            
+            if credit_cell and credit_cell.value:
+                try:
+                    credit = float(str(credit_cell.value).replace(',', '').replace('₹', '').strip())
+                except:
+                    credit = 0
+            
+            if debit == 0 and credit == 0:
+                continue
+            
+            # Auto-classify accounts based on name patterns
+            account_group = classify_account(account_name)
+            
+            accounts.append({
+                "account_name": account_name,
+                "account_group": account_group,
+                "debit": debit,
+                "credit": credit
+            })
+            
+            total_debit += debit
+            total_credit += credit
+        
+        return {
+            "success": True,
+            "extraction_method": "rule_based",
+            "data": {
+                "company_name": company_name,
+                "accounts": accounts,
+                "total_debit": total_debit,
+                "total_credit": total_credit,
+                "is_balanced": abs(total_debit - total_credit) < 1
+            },
+            "message": f"Extracted {len(accounts)} accounts from Excel"
+        }
+    except Exception as e:
+        logger.error(f"Error parsing Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error parsing Excel: {str(e)}")
+    finally:
+        if temp_file_path and os_module.path.exists(temp_file_path):
+            try:
+                os_module.unlink(temp_file_path)
+            except:
+                pass
+
+
+def classify_account(account_name: str) -> str:
+    """Auto-classify account based on name patterns"""
+    name_lower = account_name.lower()
+    
+    # Fixed Assets
+    if any(x in name_lower for x in ['land', 'building', 'plant', 'machinery', 'furniture', 'fixture', 'vehicle', 'computer', 'equipment', 'intangible']):
+        return 'fixed_assets'
+    
+    # Depreciation (contra asset)
+    if 'depreciation' in name_lower and 'accumulated' in name_lower:
+        return 'accumulated_depreciation'
+    
+    # Current Assets
+    if any(x in name_lower for x in ['cash', 'bank', 'receivable', 'debtor', 'inventory', 'stock', 'prepaid', 'advance', 'loan given']):
+        return 'current_assets'
+    
+    # Investments
+    if 'investment' in name_lower:
+        return 'investments'
+    
+    # Equity
+    if any(x in name_lower for x in ['share capital', 'capital', 'reserve', 'surplus', 'retained earning', 'profit carried']):
+        return 'equity'
+    
+    # Non-current Liabilities
+    if any(x in name_lower for x in ['long term', 'secured loan', 'term loan', 'deferred tax', 'long-term']):
+        return 'non_current_liabilities'
+    
+    # Current Liabilities
+    if any(x in name_lower for x in ['payable', 'creditor', 'outstanding', 'provision', 'duties', 'taxes payable', 'short term', 'overdraft']):
+        return 'current_liabilities'
+    
+    # Income
+    if any(x in name_lower for x in ['sales', 'revenue', 'income', 'receipt', 'discount received', 'commission received']):
+        return 'income'
+    
+    # Expenses
+    if any(x in name_lower for x in ['expense', 'cost', 'salary', 'wage', 'rent', 'utility', 'interest paid', 'depreciation', 'fee', 'charges']):
+        return 'expenses'
+    
+    return ''  # Unclassified
+
+
+@api_router.post("/financial/generate-statements")
+async def generate_financial_statements(
+    request: FinancialStatementRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate complete financial statements from trial balance"""
+    try:
+        trial_balance = request.trial_balance
+        prev_year = request.previous_year_data or {}
+        
+        # Classify accounts
+        assets = {
+            'fixed': [a for a in trial_balance if a.get('account_group') == 'fixed_assets'],
+            'accumulated_dep': [a for a in trial_balance if a.get('account_group') == 'accumulated_depreciation'],
+            'current': [a for a in trial_balance if a.get('account_group') == 'current_assets'],
+            'investments': [a for a in trial_balance if a.get('account_group') == 'investments']
+        }
+        
+        liabilities = {
+            'equity': [a for a in trial_balance if a.get('account_group') == 'equity'],
+            'non_current': [a for a in trial_balance if a.get('account_group') == 'non_current_liabilities'],
+            'current': [a for a in trial_balance if a.get('account_group') == 'current_liabilities']
+        }
+        
+        income = [a for a in trial_balance if a.get('account_group') == 'income']
+        expenses = [a for a in trial_balance if a.get('account_group') == 'expenses']
+        
+        # Calculate totals
+        gross_fixed_assets = sum(a.get('debit', 0) for a in assets['fixed'])
+        accumulated_dep = sum(a.get('credit', 0) for a in assets['accumulated_dep'])
+        net_fixed_assets = gross_fixed_assets - accumulated_dep
+        
+        total_current_assets = sum(a.get('debit', 0) for a in assets['current'])
+        total_investments = sum(a.get('debit', 0) for a in assets['investments'])
+        total_assets = net_fixed_assets + total_current_assets + total_investments
+        
+        total_equity = sum(a.get('credit', 0) for a in liabilities['equity'])
+        total_non_current_liab = sum(a.get('credit', 0) for a in liabilities['non_current'])
+        total_current_liab = sum(a.get('credit', 0) for a in liabilities['current'])
+        
+        total_income = sum(a.get('credit', 0) for a in income)
+        total_expenses = sum(a.get('debit', 0) for a in expenses)
+        net_profit = total_income - total_expenses
+        
+        # Calculate ratios
+        current_ratio = total_current_assets / total_current_liab if total_current_liab > 0 else 0
+        quick_assets = total_current_assets - sum(a.get('debit', 0) for a in assets['current'] if 'inventory' in a.get('account_name', '').lower() or 'stock' in a.get('account_name', '').lower())
+        quick_ratio = quick_assets / total_current_liab if total_current_liab > 0 else 0
+        
+        debt_equity = (total_non_current_liab + total_current_liab) / total_equity if total_equity > 0 else 0
+        
+        gross_profit_margin = (total_income - sum(a.get('debit', 0) for a in expenses if 'cost' in a.get('account_name', '').lower())) / total_income * 100 if total_income > 0 else 0
+        net_profit_margin = net_profit / total_income * 100 if total_income > 0 else 0
+        roe = net_profit / total_equity * 100 if total_equity > 0 else 0
+        
+        # Build Balance Sheet
+        balance_sheet = {
+            "as_on": request.period_end_date,
+            "assets": {
+                "fixed_assets": {
+                    "gross_block": gross_fixed_assets,
+                    "accumulated_depreciation": accumulated_dep,
+                    "net_block": net_fixed_assets,
+                    "items": [{"name": a['account_name'], "amount": a.get('debit', 0)} for a in assets['fixed']]
+                },
+                "current_assets": {
+                    "total": total_current_assets,
+                    "items": [{"name": a['account_name'], "amount": a.get('debit', 0)} for a in assets['current']]
+                },
+                "investments": {
+                    "total": total_investments,
+                    "items": [{"name": a['account_name'], "amount": a.get('debit', 0)} for a in assets['investments']]
+                },
+                "total": total_assets
+            },
+            "liabilities": {
+                "equity": {
+                    "total": total_equity + net_profit,
+                    "items": [{"name": a['account_name'], "amount": a.get('credit', 0)} for a in liabilities['equity']] + [{"name": "Current Year Profit", "amount": net_profit}]
+                },
+                "non_current": {
+                    "total": total_non_current_liab,
+                    "items": [{"name": a['account_name'], "amount": a.get('credit', 0)} for a in liabilities['non_current']]
+                },
+                "current": {
+                    "total": total_current_liab,
+                    "items": [{"name": a['account_name'], "amount": a.get('credit', 0)} for a in liabilities['current']]
+                },
+                "total": total_equity + net_profit + total_non_current_liab + total_current_liab
+            }
+        }
+        
+        # Build P&L
+        profit_loss = {
+            "period": request.financial_year,
+            "income": {
+                "total": total_income,
+                "items": [{"name": a['account_name'], "amount": a.get('credit', 0)} for a in income]
+            },
+            "expenses": {
+                "total": total_expenses,
+                "items": [{"name": a['account_name'], "amount": a.get('debit', 0)} for a in expenses]
+            },
+            "profit_before_tax": net_profit,
+            "tax_expense": 0,  # To be filled from schedules
+            "net_profit": net_profit
+        }
+        
+        # Ratios
+        ratios = {
+            "profitability": {
+                "gross_profit_margin": round(gross_profit_margin, 2),
+                "net_profit_margin": round(net_profit_margin, 2),
+                "return_on_equity": round(roe, 2)
+            },
+            "liquidity": {
+                "current_ratio": round(current_ratio, 2),
+                "quick_ratio": round(quick_ratio, 2)
+            },
+            "solvency": {
+                "debt_equity_ratio": round(debt_equity, 2)
+            }
+        }
+        
+        # Save to DB
+        statement_id = str(uuid.uuid4())
+        statement_doc = {
+            "id": statement_id,
+            "user_id": current_user['user']['id'],
+            "company_name": request.company_name,
+            "financial_year": request.financial_year,
+            "period_end_date": request.period_end_date,
+            "trial_balance": trial_balance,
+            "balance_sheet": balance_sheet,
+            "profit_loss": profit_loss,
+            "ratios": ratios,
+            "schedules": request.schedules or {},
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await db.financial_statements.insert_one(statement_doc)
+        
+        return {
+            "success": True,
+            "statement_id": statement_id,
+            "balance_sheet": balance_sheet,
+            "profit_loss": profit_loss,
+            "ratios": ratios,
+            "summary": {
+                "total_assets": total_assets,
+                "total_liabilities": balance_sheet['liabilities']['total'],
+                "net_profit": net_profit,
+                "is_balanced": abs(total_assets - balance_sheet['liabilities']['total']) < 1
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error generating statements: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating statements: {str(e)}")
+
+
+@api_router.post("/financial/generate-cash-flow")
+async def generate_cash_flow_statement(
+    statement_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate cash flow statement from balance sheet changes"""
+    try:
+        statement = await db.financial_statements.find_one({"id": statement_id, "user_id": current_user['user']['id']}, {"_id": 0})
+        if not statement:
+            raise HTTPException(status_code=404, detail="Statement not found")
+        
+        balance_sheet = statement.get('balance_sheet', {})
+        profit_loss = statement.get('profit_loss', {})
+        
+        # Cash Flow from Operating Activities
+        net_profit = profit_loss.get('net_profit', 0)
+        depreciation = sum(a.get('amount', 0) for a in profit_loss.get('expenses', {}).get('items', []) if 'depreciation' in a.get('name', '').lower())
+        
+        operating_cash_flow = net_profit + depreciation
+        
+        # Cash Flow from Investing Activities (simplified)
+        investing_cash_flow = 0  # Would need previous year data
+        
+        # Cash Flow from Financing Activities (simplified)
+        financing_cash_flow = 0  # Would need previous year data
+        
+        cash_flow = {
+            "operating": {
+                "net_profit_before_tax": profit_loss.get('profit_before_tax', net_profit),
+                "adjustments": [
+                    {"name": "Depreciation", "amount": depreciation}
+                ],
+                "working_capital_changes": [],
+                "net_cash": operating_cash_flow
+            },
+            "investing": {
+                "items": [],
+                "net_cash": investing_cash_flow
+            },
+            "financing": {
+                "items": [],
+                "net_cash": financing_cash_flow
+            },
+            "net_change": operating_cash_flow + investing_cash_flow + financing_cash_flow
+        }
+        
+        # Update statement with cash flow
+        await db.financial_statements.update_one(
+            {"id": statement_id},
+            {"$set": {"cash_flow": cash_flow}}
+        )
+        
+        return {
+            "success": True,
+            "cash_flow": cash_flow
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating cash flow: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@api_router.get("/financial/statements")
+async def get_financial_statements(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get all financial statements for user"""
+    try:
+        statements = await db.financial_statements.find(
+            {"user_id": current_user['user']['id']},
+            {"_id": 0, "id": 1, "company_name": 1, "financial_year": 1, "created_at": 1}
+        ).sort("created_at", -1).to_list(100)
+        
+        return {"success": True, "statements": statements}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/financial/statements/{statement_id}")
+async def get_financial_statement(
+    statement_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get a specific financial statement"""
+    try:
+        statement = await db.financial_statements.find_one(
+            {"id": statement_id, "user_id": current_user['user']['id']},
+            {"_id": 0}
+        )
+        if not statement:
+            raise HTTPException(status_code=404, detail="Statement not found")
+        return {"success": True, "statement": statement}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/financial/generate-sample-data")
+async def generate_sample_financial_data(
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate sample trial balance data for demo"""
+    sample_trial_balance = [
+        # Assets
+        {"account_name": "Land & Building", "account_group": "fixed_assets", "debit": 2500000, "credit": 0},
+        {"account_name": "Plant & Machinery", "account_group": "fixed_assets", "debit": 1500000, "credit": 0},
+        {"account_name": "Furniture & Fixtures", "account_group": "fixed_assets", "debit": 500000, "credit": 0},
+        {"account_name": "Vehicles", "account_group": "fixed_assets", "debit": 800000, "credit": 0},
+        {"account_name": "Computers", "account_group": "fixed_assets", "debit": 200000, "credit": 0},
+        {"account_name": "Accumulated Depreciation", "account_group": "accumulated_depreciation", "debit": 0, "credit": 1940000},
+        {"account_name": "Investments - Long Term", "account_group": "investments", "debit": 150000, "credit": 0},
+        {"account_name": "Cash & Cash Equivalents", "account_group": "current_assets", "debit": 285000, "credit": 0},
+        {"account_name": "Bank Balances", "account_group": "current_assets", "debit": 450000, "credit": 0},
+        {"account_name": "Trade Receivables", "account_group": "current_assets", "debit": 1140000, "credit": 0},
+        {"account_name": "Inventories", "account_group": "current_assets", "debit": 820000, "credit": 0},
+        {"account_name": "Prepaid Expenses", "account_group": "current_assets", "debit": 65000, "credit": 0},
+        {"account_name": "Loans & Advances", "account_group": "current_assets", "debit": 135000, "credit": 0},
+        # Liabilities
+        {"account_name": "Share Capital", "account_group": "equity", "debit": 0, "credit": 1000000},
+        {"account_name": "Reserves & Surplus", "account_group": "equity", "debit": 0, "credit": 1825000},
+        {"account_name": "Long Term Borrowings", "account_group": "non_current_liabilities", "debit": 0, "credit": 1250000},
+        {"account_name": "Trade Payables", "account_group": "current_liabilities", "debit": 0, "credit": 980000},
+        {"account_name": "Other Current Liabilities", "account_group": "current_liabilities", "debit": 0, "credit": 255000},
+        {"account_name": "Provisions", "account_group": "current_liabilities", "debit": 0, "credit": 100000},
+        # Income
+        {"account_name": "Revenue from Operations", "account_group": "income", "debit": 0, "credit": 8500000},
+        {"account_name": "Other Income", "account_group": "income", "debit": 0, "credit": 250000},
+        # Expenses
+        {"account_name": "Cost of Materials Consumed", "account_group": "expenses", "debit": 4200000, "credit": 0},
+        {"account_name": "Changes in Inventory", "account_group": "expenses", "debit": 190000, "credit": 0},
+        {"account_name": "Employee Benefit Expense", "account_group": "expenses", "debit": 1250000, "credit": 0},
+        {"account_name": "Finance Costs", "account_group": "expenses", "debit": 120000, "credit": 0},
+        {"account_name": "Depreciation Expense", "account_group": "expenses", "debit": 180000, "credit": 0},
+        {"account_name": "Other Expenses", "account_group": "expenses", "debit": 1190000, "credit": 0},
+    ]
+    
+    sample_schedules = {
+        "share_capital": {
+            "authorized": {"equity_shares": 100000, "face_value": 10, "amount": 1000000},
+            "issued": {"equity_shares": 100000, "paid_up": 10, "amount": 1000000},
+            "shareholders": [
+                {"name": "ABC Pvt Ltd", "shares": 51000, "percentage": 51},
+                {"name": "Mr. Rajesh", "shares": 25000, "percentage": 25},
+                {"name": "Mrs. Priya", "shares": 24000, "percentage": 24}
+            ]
+        },
+        "reserves": {
+            "securities_premium": 500000,
+            "general_reserve": 800000,
+            "retained_earnings": 525000
+        },
+        "fixed_assets": [
+            {"asset_class": "Building", "gross_block": 2500000, "dep_rate": 5, "depreciation": 125000, "wdv": 1850000},
+            {"asset_class": "Plant & Machinery", "gross_block": 1500000, "dep_rate": 15, "depreciation": 225000, "wdv": 850000},
+            {"asset_class": "Furniture", "gross_block": 500000, "dep_rate": 10, "depreciation": 50000, "wdv": 320000},
+            {"asset_class": "Vehicles", "gross_block": 800000, "dep_rate": 15, "depreciation": 120000, "wdv": 480000},
+            {"asset_class": "Computers", "gross_block": 200000, "dep_rate": 40, "depreciation": 80000, "wdv": 60000}
+        ],
+        "inventory": {
+            "raw_materials": 320000,
+            "work_in_progress": 150000,
+            "finished_goods": 480000,
+            "stores_spares": 45000
+        },
+        "debtors_ageing": [
+            {"customer": "ABC Corp", "total": 420000, "0_30": 250000, "31_60": 120000, "61_90": 50000, "above_90": 0},
+            {"customer": "XYZ Ltd", "total": 300000, "0_30": 180000, "31_60": 90000, "61_90": 30000, "above_90": 0},
+            {"customer": "PQR Traders", "total": 175000, "0_30": 95000, "31_60": 45000, "61_90": 20000, "above_90": 15000},
+            {"customer": "Others", "total": 245000, "0_30": 155000, "31_60": 65000, "61_90": 15000, "above_90": 10000}
+        ],
+        "creditors_ageing": [
+            {"vendor": "Sharma Constructions", "total": 310000, "0_30": 180000, "31_60": 90000, "61_90": 40000, "above_90": 0},
+            {"vendor": "Verma Engineers", "total": 250000, "0_30": 150000, "31_60": 70000, "61_90": 30000, "above_90": 0},
+            {"vendor": "Gupta & Sons", "total": 210000, "0_30": 120000, "31_60": 60000, "61_90": 20000, "above_90": 10000},
+            {"vendor": "Others", "total": 210000, "0_30": 130000, "31_60": 55000, "61_90": 15000, "above_90": 10000}
+        ]
+    }
+    
+    return {
+        "success": True,
+        "sample_data": {
+            "company_name": "ABC Trading Co. Pvt Ltd",
+            "financial_year": "2024-25",
+            "period_end_date": "2025-03-31",
+            "trial_balance": sample_trial_balance,
+            "schedules": sample_schedules
+        }
+    }
+
+
 # ==================== TDS RETURN ENDPOINTS ====================
 from tds_engine.calculator import TDSCalculator, TDSReturnGenerator, TDSTallyExporter
 
