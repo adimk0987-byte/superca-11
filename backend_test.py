@@ -401,6 +401,265 @@ class SuperCABackendTester:
             self.log_result("Dashboard Stats API", False, str(e))
             return False
 
+    # ==================== TDS TESTING METHODS ====================
+
+    def test_tds_sample_generation(self):
+        """Test TDS sample data generation API"""
+        if not self.token:
+            self.log_result("TDS Sample Data Generation", False, "No authentication token")
+            return False
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/tds/generate-sample",
+                headers=self.get_headers(),
+                timeout=30
+            )
+            
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                sample_success = data.get('success', False)
+                sample_data = data.get('sample_data', {})
+                deductees_count = len(sample_data.get('deductees', []))
+                employees_count = len(sample_data.get('employees', []))
+                
+                details = f"Success: {sample_success}, Deductees: {deductees_count}, Employees: {employees_count}"
+                success = sample_success and deductees_count > 0 and employees_count > 0
+            else:
+                details = f"HTTP {response.status_code}: {response.text[:200]}"
+            
+            # Store sample data for further tests
+            if success:
+                self.tds_sample_data = data.get('sample_data', {})
+            
+            self.log_result("TDS Sample Data Generation API", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_result("TDS Sample Data Generation API", False, str(e))
+            return False
+
+    def test_tds_download_templates(self):
+        """Test TDS Excel template downloads"""
+        if not self.token:
+            self.log_result("TDS Template Downloads", False, "No authentication token")
+            return False
+        
+        success_count = 0
+        
+        # Test deductees template
+        try:
+            response = requests.get(
+                f"{self.api_url}/tds/download-template?data_type=deductees",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=30
+            )
+            
+            deductees_success = response.status_code == 200
+            if deductees_success:
+                content_type = response.headers.get('content-type', '')
+                content_length = len(response.content)
+                is_excel = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in content_type or 'application/octet-stream' in content_type
+                has_content = content_length > 1000
+                
+                details_deductees = f"Deductees template - Excel: {is_excel}, Size: {content_length} bytes"
+                if is_excel and has_content:
+                    success_count += 1
+            else:
+                details_deductees = f"Deductees template failed - HTTP {response.status_code}"
+            
+        except Exception as e:
+            details_deductees = f"Deductees template error: {str(e)}"
+            deductees_success = False
+
+        # Test employees template
+        try:
+            response = requests.get(
+                f"{self.api_url}/tds/download-template?data_type=employees",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=30
+            )
+            
+            employees_success = response.status_code == 200
+            if employees_success:
+                content_type = response.headers.get('content-type', '')
+                content_length = len(response.content)
+                is_excel = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' in content_type or 'application/octet-stream' in content_type
+                has_content = content_length > 1000
+                
+                details_employees = f"Employees template - Excel: {is_excel}, Size: {content_length} bytes"
+                if is_excel and has_content:
+                    success_count += 1
+            else:
+                details_employees = f"Employees template failed - HTTP {response.status_code}"
+            
+        except Exception as e:
+            details_employees = f"Employees template error: {str(e)}"
+            employees_success = False
+
+        overall_success = success_count == 2
+        combined_details = f"{details_deductees} | {details_employees}"
+        
+        self.log_result("TDS Excel Template Downloads", overall_success, combined_details)
+        return overall_success
+
+    def test_tds_calculation(self):
+        """Test TDS calculation with Form 24Q and 26Q generation"""
+        if not self.token:
+            self.log_result("TDS Calculation", False, "No authentication token")
+            return False
+        
+        if not hasattr(self, 'tds_sample_data'):
+            self.log_result("TDS Calculation", False, "No sample data available for calculation")
+            return False
+        
+        try:
+            # Use sample data for calculation
+            calculation_data = {
+                "tan": "DELA12345B",
+                "pan": "AABCT1234F",
+                "company_name": "Test CA Firm",
+                "quarter": 4,
+                "financial_year": "2024-25",
+                "deductees": self.tds_sample_data.get('deductees', []),
+                "employees": self.tds_sample_data.get('employees', [])
+            }
+            
+            response = requests.post(
+                f"{self.api_url}/tds/calculate",
+                json=calculation_data,
+                headers=self.get_headers(),
+                timeout=60
+            )
+            
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                calc_success = data.get('success', False)
+                self.tds_return_id = data.get('return_id')
+                
+                # Check for required components
+                has_form_26q = bool(data.get('form_26q'))
+                has_form_24q = bool(data.get('form_24q'))
+                has_summary = bool(data.get('summary'))
+                has_pan_validation = bool(data.get('pan_validation'))
+                
+                details = f"Calc success: {calc_success}, Form 26Q: {has_form_26q}, Form 24Q: {has_form_24q}, Summary: {has_summary}, PAN validation: {has_pan_validation}"
+                if self.tds_return_id:
+                    details += f", Return ID: {self.tds_return_id[:8]}..."
+                
+                success = calc_success and has_form_26q and has_form_24q and has_summary
+            else:
+                details = f"HTTP {response.status_code}: {response.text[:200]}"
+            
+            self.log_result("TDS Calculation with Forms 24Q/26Q", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_result("TDS Calculation with Forms 24Q/26Q", False, str(e))
+            return False
+
+    def test_tds_tally_xml_export(self):
+        """Test Tally XML export from TDS return"""
+        if not self.token:
+            self.log_result("TDS Tally XML Export", False, "No authentication token")
+            return False
+        
+        if not hasattr(self, 'tds_return_id') or not self.tds_return_id:
+            self.log_result("TDS Tally XML Export", False, "No TDS return ID from calculation")
+            return False
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/tds/returns/{self.tds_return_id}/tally-xml",
+                headers=self.get_headers(),
+                timeout=30
+            )
+            
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                xml_success = data.get('success', False)
+                has_xml = bool(data.get('xml'))
+                has_summary = bool(data.get('summary'))
+                
+                details = f"XML generation success: {xml_success}, Has XML: {has_xml}, Has summary: {has_summary}"
+                success = xml_success and has_xml and has_summary
+            else:
+                details = f"HTTP {response.status_code}: {response.text[:200]}"
+            
+            self.log_result("TDS Tally XML Export", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_result("TDS Tally XML Export", False, str(e))
+            return False
+
+    def test_tds_traces_json_export(self):
+        """Test TRACES JSON export for both 24Q and 26Q"""
+        if not self.token:
+            self.log_result("TDS TRACES JSON Export", False, "No authentication token")
+            return False
+        
+        if not hasattr(self, 'tds_return_id') or not self.tds_return_id:
+            self.log_result("TDS TRACES JSON Export", False, "No TDS return ID from calculation")
+            return False
+        
+        success_count = 0
+        
+        # Test Form 26Q JSON
+        try:
+            response = requests.post(
+                f"{self.api_url}/tds/returns/{self.tds_return_id}/traces-json?form_type=26Q",
+                headers=self.get_headers(),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                json_success = data.get('success', False)
+                has_json = bool(data.get('json'))
+                if json_success and has_json:
+                    success_count += 1
+                    details_26q = "Form 26Q JSON: Success"
+                else:
+                    details_26q = "Form 26Q JSON: Missing data"
+            else:
+                details_26q = f"Form 26Q JSON: HTTP {response.status_code}"
+                
+        except Exception as e:
+            details_26q = f"Form 26Q JSON: Error - {str(e)}"
+
+        # Test Form 24Q JSON  
+        try:
+            response = requests.post(
+                f"{self.api_url}/tds/returns/{self.tds_return_id}/traces-json?form_type=24Q",
+                headers=self.get_headers(),
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                json_success = data.get('success', False)
+                has_json = bool(data.get('json'))
+                if json_success and has_json:
+                    success_count += 1
+                    details_24q = "Form 24Q JSON: Success"
+                else:
+                    details_24q = "Form 24Q JSON: Missing data"
+            else:
+                details_24q = f"Form 24Q JSON: HTTP {response.status_code}"
+                
+        except Exception as e:
+            details_24q = f"Form 24Q JSON: Error - {str(e)}"
+
+        overall_success = success_count == 2
+        combined_details = f"{details_26q} | {details_24q}"
+        
+        self.log_result("TDS TRACES JSON Export (24Q & 26Q)", overall_success, combined_details)
+        return overall_success
+
     def run_all_tests(self):
         """Run complete test suite"""
         print("=" * 60)
