@@ -1034,7 +1034,7 @@ const GSTFiling = () => {
           {/* Download Section */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6" data-testid="download-section">
             <h3 className="text-lg font-bold text-slate-900 mb-4">Download Detailed Reports (PDF)</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
               <Button onClick={() => handleDownload('gstr3b')} disabled={loading}
                 className="bg-slate-800 hover:bg-slate-900 text-white flex-col h-auto py-4"
                 data-testid="download-gstr3b-btn">
@@ -1055,6 +1055,14 @@ const GSTFiling = () => {
                 <Download size={22} className="mb-2" />
                 <span className="text-sm">ITC Statement</span>
                 <span className="text-[10px] opacity-75">17(5) + Rule 42/43</span>
+              </Button>
+              <Button onClick={handleExportToTally}
+                disabled={loading || !filingId}
+                className="bg-purple-600 hover:bg-purple-700 text-white flex-col h-auto py-4"
+                data-testid="export-tally-btn">
+                <FileSpreadsheet size={22} className="mb-2" />
+                <span className="text-sm">Tally XML</span>
+                <span className="text-[10px] opacity-75">Ready to Import</span>
               </Button>
               <Button onClick={() => { handleDownload('gstr3b'); handleDownload('reconciliation'); handleDownload('itc'); }}
                 disabled={loading}
