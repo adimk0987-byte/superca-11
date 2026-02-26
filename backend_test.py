@@ -105,73 +105,37 @@ class SuperCABackendTester:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def test_upload_form16(self):
-        """Test Form-16 upload endpoint"""
+    def test_gst_calculate(self):
+        """Test GST calculation endpoint"""
         if not self.token:
-            self.log_result("Form-16 Upload", False, "No authentication token")
+            self.log_result("GST Calculate", False, "No authentication token")
             return False
         
         try:
-            # Create a dummy PDF file for testing
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
-                tmp_file.write(b'%PDF-1.4\n%Test PDF content for ITR testing')
-                tmp_file_path = tmp_file.name
-            
-            # Upload file
-            with open(tmp_file_path, 'rb') as f:
-                files = {'file': ('test_form16.pdf', f, 'application/pdf')}
-                headers = {"Authorization": f"Bearer {self.token}"}
-                response = requests.post(
-                    f"{self.api_url}/itr/upload-form16",
-                    files=files,
-                    headers=headers,
-                    timeout=30
-                )
-            
-            # Cleanup
-            os.unlink(tmp_file_path)
-            
-            success = response.status_code == 200
-            if success:
-                data = response.json()
-                extracted_success = data.get('success', False)
-                details = f"Upload success: {extracted_success}, Data extracted: {bool(data.get('data'))}"
-            else:
-                details = f"HTTP {response.status_code}: {response.text[:200]}"
-            
-            self.log_result("Form-16 Upload", success, details)
-            return success
-            
-        except Exception as e:
-            self.log_result("Form-16 Upload", False, str(e))
-            return False
-
-    def test_calculate_tax(self):
-        """Test tax calculation endpoint"""
-        if not self.token:
-            self.log_result("Tax Calculation", False, "No authentication token")
-            return False
-        
-        try:
-            # Test data for tax calculation
-            form16_data = {
-                "employee_pan": "ABCDE1234F",
-                "employee_name": "Test User ITR",
-                "employer_tan": "ABCD12345D",
-                "employer_name": "Test Employer Ltd",
-                "financial_year": "2024-25",
-                "gross_salary": 1200000,
-                "section_80c": 150000,
-                "section_80d": 25000,
-                "other_deductions": 0,
-                "total_deductions": 175000,
-                "tds_deducted": 120000,
-                "hra_claimed": 200000
+            # Test data for GST calculation
+            gst_data = {
+                "gstin": "27ABCDE1234F1Z5",
+                "business_name": "Test CA Firm",
+                "period": "012025",
+                "total_sales": 2500000,
+                "taxable_5": 500000,
+                "taxable_12": 800000,
+                "taxable_18": 1000000,
+                "taxable_28": 200000,
+                "total_purchases": 1420000,
+                "total_itc": 177000,
+                "blocked_itc": 8000,
+                "reversed_itc": 7250,
+                "purchases_in_books": 156,
+                "purchases_in_2a": 142,
+                "matched_purchases": 138,
+                "missing_in_2a_value": 85000,
+                "is_interstate": False
             }
             
             response = requests.post(
-                f"{self.api_url}/itr/calculate-tax",
-                json=form16_data,
+                f"{self.api_url}/gst/calculate",
+                json=gst_data,
                 headers=self.get_headers(),
                 timeout=30
             )
@@ -181,40 +145,40 @@ class SuperCABackendTester:
                 data = response.json()
                 calc_success = data.get('success', False)
                 calculation = data.get('calculation', {})
-                self.itr_id = data.get('itr_id')  # Save for PDF generation
+                self.gst_filing_id = data.get('filing_id')  # Save for PDF generation
                 
-                # Verify both regimes are calculated
-                has_old_regime = 'old_regime_tax' in calculation
-                has_new_regime = 'new_regime_tax' in calculation
-                has_suggestion = 'suggested_regime' in calculation
+                # Verify key components are calculated
+                has_output_tax = 'output_tax' in calculation
+                has_input_tax = 'input_tax_credit' in calculation
+                has_net_payable = 'net_payable' in calculation
                 
-                details = f"Calc success: {calc_success}, Old regime: {has_old_regime}, New regime: {has_new_regime}, Suggestion: {has_suggestion}"
-                if self.itr_id:
-                    details += f", ITR ID: {self.itr_id[:8]}..."
+                details = f"Calc success: {calc_success}, Output tax: {has_output_tax}, Input tax: {has_input_tax}, Net payable: {has_net_payable}"
+                if self.gst_filing_id:
+                    details += f", Filing ID: {self.gst_filing_id[:8]}..."
                 
             else:
                 details = f"HTTP {response.status_code}: {response.text[:200]}"
             
-            self.log_result("Tax Calculation API", success, details)
+            self.log_result("GST Calculation API", success, details)
             return success
             
         except Exception as e:
-            self.log_result("Tax Calculation API", False, str(e))
+            self.log_result("GST Calculation API", False, str(e))
             return False
 
-    def test_pdf_generation(self):
-        """Test ITR PDF generation"""
+    def test_gstr3b_pdf_generation(self):
+        """Test GSTR-3B PDF generation"""
         if not self.token:
-            self.log_result("ITR PDF Generation", False, "No authentication token")
+            self.log_result("GSTR-3B PDF Generation", False, "No authentication token")
             return False
         
-        if not self.itr_id:
-            self.log_result("ITR PDF Generation", False, "No ITR ID from calculation")
+        if not self.gst_filing_id:
+            self.log_result("GSTR-3B PDF Generation", False, "No GST Filing ID from calculation")
             return False
         
         try:
-            response = requests.get(
-                f"{self.api_url}/itr/{self.itr_id}/generate-pdf",
+            response = requests.post(
+                f"{self.api_url}/gst/{self.gst_filing_id}/generate-pdf?report_type=gstr3b",
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=60  # PDF generation may take time
             )
@@ -231,80 +195,189 @@ class SuperCABackendTester:
             else:
                 details = f"HTTP {response.status_code}: {response.text[:200]}"
             
-            self.log_result("ITR PDF Generation API", success, details)
+            self.log_result("GSTR-3B PDF Generation API", success, details)
             return success
             
         except Exception as e:
-            self.log_result("ITR PDF Generation API", False, str(e))
+            self.log_result("GSTR-3B PDF Generation API", False, str(e))
             return False
 
-    def test_document_processing(self):
-        """Test multi-document processing endpoint"""
+    def test_reconciliation_pdf_generation(self):
+        """Test Reconciliation PDF generation"""
         if not self.token:
-            self.log_result("Document Processing", False, "No authentication token")
+            self.log_result("Reconciliation PDF Generation", False, "No authentication token")
+            return False
+        
+        if not self.gst_filing_id:
+            self.log_result("Reconciliation PDF Generation", False, "No GST Filing ID from calculation")
             return False
         
         try:
-            # Create test files
-            files_to_upload = []
-            temp_files = []
-            
-            # Form 16
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                tmp.write(b'%PDF-1.4\n%Test Form16 content')
-                temp_files.append(tmp.name)
-                files_to_upload.append(('files', ('form16.pdf', open(tmp.name, 'rb'), 'application/pdf')))
-            
-            # Bank Statement
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                tmp.write(b'%PDF-1.4\n%Test Bank Statement content')
-                temp_files.append(tmp.name)
-                files_to_upload.append(('files', ('bank_statement.pdf', open(tmp.name, 'rb'), 'application/pdf')))
-            
-            headers = {"Authorization": f"Bearer {self.token}"}
             response = requests.post(
-                f"{self.api_url}/itr/process-documents",
-                files=files_to_upload,
-                headers=headers,
+                f"{self.api_url}/gst/{self.gst_filing_id}/generate-pdf?report_type=reconciliation",
+                headers={"Authorization": f"Bearer {self.token}"},
                 timeout=60
             )
             
-            # Cleanup
-            for f in files_to_upload:
-                f[1][1].close()
-            for temp_file in temp_files:
-                try:
-                    os.unlink(temp_file)
-                except:
-                    pass
+            success = response.status_code == 200
+            if success:
+                content_type = response.headers.get('content-type', '')
+                content_length = len(response.content)
+                is_pdf = 'application/pdf' in content_type
+                has_content = content_length > 1000
+                
+                details = f"PDF: {is_pdf}, Size: {content_length} bytes"
+                success = is_pdf and has_content
+            else:
+                details = f"HTTP {response.status_code}: {response.text[:200]}"
+            
+            self.log_result("Reconciliation PDF Generation API", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_result("Reconciliation PDF Generation API", False, str(e))
+            return False
+
+    def test_itc_pdf_generation(self):
+        """Test ITC Statement PDF generation"""
+        if not self.token:
+            self.log_result("ITC PDF Generation", False, "No authentication token")
+            return False
+        
+        if not self.gst_filing_id:
+            self.log_result("ITC PDF Generation", False, "No GST Filing ID from calculation")
+            return False
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/gst/{self.gst_filing_id}/generate-pdf?report_type=itc",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=60
+            )
+            
+            success = response.status_code == 200
+            if success:
+                content_type = response.headers.get('content-type', '')
+                content_length = len(response.content)
+                is_pdf = 'application/pdf' in content_type
+                has_content = content_length > 1000
+                
+                details = f"PDF: {is_pdf}, Size: {content_length} bytes"
+                success = is_pdf and has_content
+            else:
+                details = f"HTTP {response.status_code}: {response.text[:200]}"
+            
+            self.log_result("ITC PDF Generation API", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_result("ITC PDF Generation API", False, str(e))
+            return False
+
+    def test_tally_xml_generation(self):
+        """Test Tally XML generation from GST filing"""
+        if not self.token:
+            self.log_result("Tally XML Generation", False, "No authentication token")
+            return False
+        
+        if not self.gst_filing_id:
+            self.log_result("Tally XML Generation", False, "No GST Filing ID from calculation")
+            return False
+        
+        try:
+            response = requests.post(
+                f"{self.api_url}/tally/generate-gst-xml?filing_id={self.gst_filing_id}",
+                headers=self.get_headers(),
+                timeout=30
+            )
             
             success = response.status_code == 200
             if success:
                 data = response.json()
-                has_extracted = bool(data.get('extracted_data'))
-                has_reconciliation = data.get('reconciliation') is not None
-                has_suggestion = data.get('suggested_itr_form') is not None
+                xml_success = data.get('success', False)
+                has_xml = bool(data.get('xml'))
+                has_summary = bool(data.get('summary'))
                 
-                details = f"Extracted: {has_extracted}, Reconciliation: {has_reconciliation}, ITR suggestion: {has_suggestion}"
+                details = f"XML generation success: {xml_success}, Has XML: {has_xml}, Has summary: {has_summary}"
             else:
                 details = f"HTTP {response.status_code}: {response.text[:200]}"
             
-            self.log_result("Document Processing API", success, details)
+            self.log_result("Tally XML Generation API", success, details)
             return success
             
         except Exception as e:
-            self.log_result("Document Processing API", False, str(e))
+            self.log_result("Tally XML Generation API", False, str(e))
             return False
 
-    def test_itr_history(self):
-        """Test ITR filing history endpoint"""
+    def test_tally_voucher_generation(self):
+        """Test Tally voucher XML generation"""
         if not self.token:
-            self.log_result("ITR History", False, "No authentication token")
+            self.log_result("Tally Voucher Generation", False, "No authentication token")
+            return False
+        
+        try:
+            # Test data for voucher generation
+            voucher_data = {
+                "vouchers": [
+                    {
+                        "date": "2025-01-15",
+                        "voucher_type": "receipt",
+                        "voucher_number": "V-001",
+                        "party_name": "Test Customer",
+                        "debit_account": "HDFC Bank A/c",
+                        "credit_account": "Sales A/c",
+                        "amount": 10000,
+                        "narration": "Test sale transaction",
+                        "reference": "INV-001",
+                        "gstin": "27ABCDE1234F1Z5",
+                        "gst_applicable": False,
+                        "gst_rate": 18,
+                        "cgst": 0,
+                        "sgst": 0,
+                        "igst": 0,
+                        "total_amount": 10000
+                    }
+                ],
+                "company_name": "Test CA Firm",
+                "financial_year": "2024-25",
+                "include_masters": True
+            }
+            
+            response = requests.post(
+                f"{self.api_url}/tally/generate-xml",
+                json=voucher_data,
+                headers=self.get_headers(),
+                timeout=30
+            )
+            
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                xml_success = data.get('success', False)
+                has_xml = bool(data.get('xml'))
+                stats = data.get('stats', {})
+                voucher_count = stats.get('voucher_count', 0)
+                
+                details = f"XML success: {xml_success}, Has XML: {has_xml}, Vouchers: {voucher_count}"
+            else:
+                details = f"HTTP {response.status_code}: {response.text[:200]}"
+            
+            self.log_result("Tally Voucher XML Generation API", success, details)
+            return success
+            
+        except Exception as e:
+            self.log_result("Tally Voucher XML Generation API", False, str(e))
+            return False
+
+    def test_dashboard_stats(self):
+        """Test dashboard stats endpoint"""
+        if not self.token:
+            self.log_result("Dashboard Stats", False, "No authentication token")
             return False
         
         try:
             response = requests.get(
-                f"{self.api_url}/itr/history",
+                f"{self.api_url}/dashboard/stats",
                 headers=self.get_headers(),
                 timeout=10
             )
@@ -312,16 +385,20 @@ class SuperCABackendTester:
             success = response.status_code == 200
             if success:
                 data = response.json()
-                filings_count = len(data) if isinstance(data, list) else 0
-                details = f"Found {filings_count} ITR filings in history"
+                has_revenue = 'total_revenue' in data
+                has_expenses = 'total_expenses' in data
+                has_receivables = 'outstanding_receivables' in data
+                has_customers = 'total_customers' in data
+                
+                details = f"Has revenue: {has_revenue}, expenses: {has_expenses}, receivables: {has_receivables}, customers: {has_customers}"
             else:
                 details = f"HTTP {response.status_code}: {response.text[:200]}"
             
-            self.log_result("ITR History API", success, details)
+            self.log_result("Dashboard Stats API", success, details)
             return success
             
         except Exception as e:
-            self.log_result("ITR History API", False, str(e))
+            self.log_result("Dashboard Stats API", False, str(e))
             return False
 
     def run_all_tests(self):
