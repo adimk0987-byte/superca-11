@@ -404,7 +404,7 @@ class SuperCABackendTester:
     def run_all_tests(self):
         """Run complete test suite"""
         print("=" * 60)
-        print("ITR PDF GENERATOR - BACKEND API TESTING")
+        print("SUPERCA GST/TAX AUTOMATION - BACKEND API TESTING")
         print("=" * 60)
         print(f"Backend URL: {self.base_url}")
         print(f"Test Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -424,18 +424,20 @@ class SuperCABackendTester:
             auth_success = self.create_test_user_if_needed()
         
         if not auth_success:
-            print("❌ CRITICAL: Cannot authenticate. Stopping ITR tests.")
+            print("❌ CRITICAL: Cannot authenticate. Stopping GST tests.")
             return self.print_summary()
         
-        # Step 3: ITR-specific endpoints
-        print("🔍 Testing ITR-specific endpoints...")
+        # Step 3: GST-specific endpoints
+        print("🔍 Testing GST & Tally-specific endpoints...")
         print()
         
-        self.test_upload_form16()
-        self.test_calculate_tax()  # This saves itr_id for PDF test
-        self.test_pdf_generation()
-        self.test_document_processing()
-        self.test_itr_history()
+        self.test_gst_calculate()  # This saves filing_id for PDF tests
+        self.test_gstr3b_pdf_generation()
+        self.test_reconciliation_pdf_generation()
+        self.test_itc_pdf_generation()
+        self.test_tally_xml_generation()
+        self.test_tally_voucher_generation()
+        self.test_dashboard_stats()
         
         return self.print_summary()
 
