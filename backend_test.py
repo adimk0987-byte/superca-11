@@ -20,6 +20,7 @@ class SuperCABackendTester:
         self.tests_run = 0
         self.tests_passed = 0
         self.gst_filing_id = None
+        self.tds_return_id = None  # Add TDS return ID storage
         self.errors = []
 
     def log_result(self, test_name, success, details=""):
