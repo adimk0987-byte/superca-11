@@ -3867,6 +3867,184 @@ async def generate_sample_tds_data(
     }
 
 
+# Upload TDS data from Excel
+@api_router.post("/tds/upload-excel")
+async def upload_tds_excel(
+    file: UploadFile = File(...),
+    data_type: str = Query(..., description="deductees or employees"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload TDS deductee or employee data from Excel file"""
+    import openpyxl
+    from io import BytesIO
+    
+    try:
+        # Read file content
+        content = await file.read()
+        workbook = openpyxl.load_workbook(BytesIO(content))
+        sheet = workbook.active
+        
+        # Get headers from first row
+        headers = [cell.value.lower().strip() if cell.value else '' for cell in sheet[1]]
+        
+        results = []
+        errors = []
+        
+        if data_type == "deductees":
+            # Expected columns: Name, PAN, Section, Invoice No, Date, Amount, Month
+            required = ['name', 'pan', 'section', 'amount']
+            
+            for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+                if not any(row):  # Skip empty rows
+                    continue
+                    
+                row_data = dict(zip(headers, row))
+                
+                # Validate required fields
+                missing = [f for f in required if not row_data.get(f)]
+                if missing:
+                    errors.append(f"Row {row_idx}: Missing fields: {', '.join(missing)}")
+                    continue
+                
+                # Map to expected format
+                deductee = {
+                    "name": str(row_data.get('name', '')).strip(),
+                    "pan": str(row_data.get('pan', '')).strip().upper(),
+                    "section": str(row_data.get('section', '194C')).strip().upper(),
+                    "invoice_no": str(row_data.get('invoice no', row_data.get('invoice_no', f'INV/{row_idx}'))).strip(),
+                    "date": str(row_data.get('date', '01-01-2025')),
+                    "amount": float(row_data.get('amount', 0)),
+                    "is_company": str(row_data.get('is_company', 'no')).lower() in ['yes', 'true', '1', 'y'],
+                    "property_type": str(row_data.get('property_type', 'building')),
+                    "month": str(row_data.get('month', 'January'))
+                }
+                
+                # Validate PAN format
+                if len(deductee['pan']) != 10:
+                    errors.append(f"Row {row_idx}: Invalid PAN format for {deductee['name']}")
+                
+                # Validate section
+                valid_sections = ['194C', '194J', '194I', '194A', '194H', '194D']
+                if deductee['section'] not in valid_sections:
+                    errors.append(f"Row {row_idx}: Invalid section {deductee['section']} for {deductee['name']}")
+                    continue
+                
+                results.append(deductee)
+                
+        elif data_type == "employees":
+            # Expected columns: Name, PAN, Designation, Monthly Salary, 80C, 80D, HRA
+            required = ['name', 'pan', 'monthly salary']
+            
+            for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+                if not any(row):  # Skip empty rows
+                    continue
+                    
+                row_data = dict(zip(headers, row))
+                
+                # Validate required fields
+                missing = [f for f in required if not row_data.get(f) and not row_data.get(f.replace(' ', '_'))]
+                if missing:
+                    errors.append(f"Row {row_idx}: Missing fields: {', '.join(missing)}")
+                    continue
+                
+                # Map to expected format
+                employee = {
+                    "name": str(row_data.get('name', '')).strip(),
+                    "pan": str(row_data.get('pan', '')).strip().upper(),
+                    "designation": str(row_data.get('designation', 'Employee')).strip(),
+                    "date_of_joining": str(row_data.get('date of joining', row_data.get('date_of_joining', '01-04-2020'))),
+                    "monthly_salary": float(row_data.get('monthly salary', row_data.get('monthly_salary', 0))),
+                    "exemptions": {
+                        "80C": float(row_data.get('80c', 0) or 0),
+                        "80D": float(row_data.get('80d', 0) or 0),
+                        "HRA": float(row_data.get('hra', 0) or 0),
+                        "LTA": float(row_data.get('lta', 0) or 0),
+                    }
+                }
+                
+                # Validate PAN format
+                if len(employee['pan']) != 10:
+                    errors.append(f"Row {row_idx}: Invalid PAN format for {employee['name']}")
+                
+                results.append(employee)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid data_type. Use 'deductees' or 'employees'")
+        
+        return {
+            "success": True,
+            "data_type": data_type,
+            "total_rows": len(results),
+            "errors": errors,
+            "data": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing Excel upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+
+# Download sample Excel template
+@api_router.get("/tds/download-template")
+async def download_tds_template(
+    data_type: str = Query(..., description="deductees or employees"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Download sample Excel template for TDS data upload"""
+    import openpyxl
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    
+    if data_type == "deductees":
+        sheet.title = "TDS Deductees"
+        headers = ["Name", "PAN", "Section", "Invoice No", "Date", "Amount", "Is Company", "Property Type", "Month"]
+        sample_data = [
+            ["Sharma Constructions", "ABMPS1234P", "194C", "CONT/001", "15-01-2025", 500000, "No", "", "January"],
+            ["Legal Associates", "AAIFL7890V", "194J", "PROF/001", "10-01-2025", 150000, "No", "", "January"],
+            ["Property Owner", "ABNOP1234A", "194I", "RENT/001", "31-03-2025", 90000, "No", "building", "March"],
+            ["FD Interest", "AAIPD1234D", "194A", "INT/001", "31-03-2025", 42000, "No", "", "March"],
+        ]
+    else:
+        sheet.title = "TDS Employees"
+        headers = ["Name", "PAN", "Designation", "Date of Joining", "Monthly Salary", "80C", "80D", "HRA", "LTA"]
+        sample_data = [
+            ["Rajesh Kumar", "ABCPR1234K", "Manager", "01-04-2020", 80000, 150000, 25000, 96000, 20000],
+            ["Priya Sharma", "BCDPS5678L", "Accountant", "15-06-2021", 60000, 120000, 15000, 72000, 0],
+            ["Amit Verma", "CDEAV9012M", "Executive", "10-01-2022", 50000, 90000, 12000, 60000, 0],
+        ]
+    
+    # Write headers
+    for col, header in enumerate(headers, 1):
+        cell = sheet.cell(row=1, column=col, value=header)
+        cell.font = openpyxl.styles.Font(bold=True)
+        cell.fill = openpyxl.styles.PatternFill(start_color="DDEEFF", end_color="DDEEFF", fill_type="solid")
+    
+    # Write sample data
+    for row_idx, row_data in enumerate(sample_data, 2):
+        for col_idx, value in enumerate(row_data, 1):
+            sheet.cell(row=row_idx, column=col_idx, value=value)
+    
+    # Adjust column widths
+    for col in sheet.columns:
+        max_length = max(len(str(cell.value or "")) for cell in col)
+        sheet.column_dimensions[col[0].column_letter].width = max_length + 2
+    
+    # Save to BytesIO
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    
+    filename = f"TDS_{data_type}_template.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 # ==================== TALLY XML GENERATION ====================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
