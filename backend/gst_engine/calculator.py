@@ -79,6 +79,10 @@ class GSTCalculator:
         rate_18 = float(sales_data.get('taxable_18', 0))
         rate_28 = float(sales_data.get('taxable_28', 0))
         
+        # If no rate breakdown provided, assume all is 18%
+        if rate_5 == 0 and rate_12 == 0 and rate_18 == 0 and rate_28 == 0 and total_taxable > 0:
+            rate_18 = total_taxable
+        
         tax_5 = rate_5 * 0.05
         tax_12 = rate_12 * 0.12
         tax_18 = rate_18 * 0.18
