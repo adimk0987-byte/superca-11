@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 
 const TDSFiling = () => {
-  const { company } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -21,7 +20,7 @@ const TDSFiling = () => {
   const [formData, setFormData] = useState({
     tan: 'DELA12345B',
     pan: 'AABCT1234F',
-    company_name: company?.name || 'ABC Trading Co.',
+    company_name: 'ABC Trading Co.',
     quarter: 4,
     financial_year: '2024-25',
     deductees: [],
