@@ -2363,6 +2363,190 @@ async def get_gst_filing_history(
     return history
 
 
+# ==================== NEW COMPREHENSIVE GST FILING SYSTEM ====================
+
+class GSTFilingRequest(BaseModel):
+    """GST Filing Request with all data"""
+    gstin: str
+    business_name: str
+    period: str  # MMYYYY format
+    # Sales data
+    total_sales: float = 0
+    taxable_5: float = 0
+    taxable_12: float = 0
+    taxable_18: float = 0
+    taxable_28: float = 0
+    # Purchase data
+    total_purchases: float = 0
+    total_itc: float = 0
+    blocked_itc: float = 0
+    reversed_itc: float = 0
+    # Reconciliation data
+    purchases_in_books: int = 0
+    purchases_in_2a: int = 0
+    matched_purchases: int = 0
+    missing_in_2a_value: float = 0
+    is_interstate: bool = False
+
+
+@api_router.post("/gst/calculate")
+async def calculate_gst_complete(
+    request: GSTFilingRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Complete GST Calculation with all components:
+    - Output tax from sales
+    - ITC calculation with eligibility
+    - Net tax payable
+    - Reconciliation status
+    """
+    from gst_engine.calculator import GSTCalculator, GSTReportGenerator
+    
+    company_id = current_user["company"]["id"]
+    
+    # Prepare sales data
+    sales_data = {
+        'total_taxable_value': request.total_sales,
+        'taxable_5': request.taxable_5,
+        'taxable_12': request.taxable_12,
+        'taxable_18': request.taxable_18,
+        'taxable_28': request.taxable_28
+    }
+    
+    # Prepare purchase data
+    purchase_data = {
+        'total_itc': request.total_itc,
+        'blocked_itc': request.blocked_itc,
+        'reversed_itc': request.reversed_itc,
+        'intrastate_purchases': request.total_purchases if not request.is_interstate else 0,
+        'interstate_purchases': request.total_purchases if request.is_interstate else 0
+    }
+    
+    # Calculate GST
+    gst_calculation = GSTCalculator.calculate_gst(
+        sales_data, purchase_data, request.is_interstate
+    )
+    
+    # Reconciliation summary
+    reconciliation = {
+        'summary': {
+            'total_invoices_in_books': request.purchases_in_books,
+            'total_invoices_in_2a': request.purchases_in_2a,
+            'matched_count': request.matched_purchases,
+            'missing_in_2a_value': request.missing_in_2a_value,
+            'match_percentage': (request.matched_purchases / request.purchases_in_books * 100) if request.purchases_in_books > 0 else 100
+        },
+        'recommendations': []
+    }
+    
+    if request.missing_in_2a_value > 0:
+        reconciliation['recommendations'].append(
+            f"₹{request.missing_in_2a_value:,.0f} ITC at risk. Follow up with vendors."
+        )
+    
+    # Generate summary
+    summary = GSTReportGenerator.generate_summary(
+        gstin=request.gstin,
+        business_name=request.business_name,
+        period=request.period,
+        gst_calculation=gst_calculation,
+        reconciliation=reconciliation
+    )
+    
+    # Save filing
+    filing_id = str(uuid.uuid4())
+    filing_data = {
+        'id': filing_id,
+        'company_id': company_id,
+        'gstin': request.gstin,
+        'business_name': request.business_name,
+        'period': request.period,
+        'sales_data': sales_data,
+        'purchase_data': purchase_data,
+        'gst_calculation': gst_calculation,
+        'reconciliation': reconciliation,
+        'summary': summary,
+        'status': 'calculated',
+        'created_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.gst_filings_v2.insert_one(filing_data)
+    
+    return {
+        'success': True,
+        'filing_id': filing_id,
+        'calculation': gst_calculation,
+        'summary': summary,
+        'reconciliation': reconciliation
+    }
+
+
+@api_router.post("/gst/{filing_id}/generate-pdf")
+async def generate_gst_pdf_complete(
+    filing_id: str,
+    report_type: str = "gstr3b",  # gstr3b, reconciliation, itc, all
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate GST PDF reports"""
+    from fastapi.responses import Response
+    from gst_engine.pdf_generator import GSTPDFGenerator
+    
+    company_id = current_user["company"]["id"]
+    
+    # Get filing
+    filing = await db.gst_filings_v2.find_one(
+        {'id': filing_id, 'company_id': company_id},
+        {'_id': 0}
+    )
+    
+    if not filing:
+        raise HTTPException(status_code=404, detail="GST filing not found")
+    
+    generator = GSTPDFGenerator()
+    
+    try:
+        if report_type == 'gstr3b':
+            pdf_bytes = generator.generate_gstr3b_pdf(filing['summary'])
+            filename = f"GSTR3B_{filing['period']}_{filing['gstin']}.pdf"
+        elif report_type == 'reconciliation':
+            pdf_bytes = generator.generate_reconciliation_pdf(
+                filing['reconciliation'],
+                filing['summary']['header']
+            )
+            filename = f"Reconciliation_{filing['period']}_{filing['gstin']}.pdf"
+        elif report_type == 'itc':
+            pdf_bytes = generator.generate_itc_statement_pdf(
+                filing['summary']['itc_summary'],
+                filing['summary']['header']
+            )
+            filename = f"ITC_Statement_{filing['period']}_{filing['gstin']}.pdf"
+        else:
+            # Generate GSTR-3B by default
+            pdf_bytes = generator.generate_gstr3b_pdf(filing['summary'])
+            filename = f"GSTR3B_{filing['period']}_{filing['gstin']}.pdf"
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"GST PDF generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+
+
+@api_router.get("/gst/filings")
+async def get_gst_filings_v2(current_user: dict = Depends(get_current_user)):
+    """Get all GST filings for the company"""
+    company_id = current_user["company"]["id"]
+    filings = await db.gst_filings_v2.find(
+        {'company_id': company_id},
+        {'_id': 0}
+    ).sort('created_at', -1).to_list(100)
+    return filings
+
+
 # Request model for filing mode
 class GSTFilingModeRequest(BaseModel):
     filing_mode: str = "MANUAL"  # MANUAL or GSTN_API
