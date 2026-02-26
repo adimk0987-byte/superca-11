@@ -209,8 +209,8 @@ const TallyEntry = () => {
     setSuccess(`${newVouchers.length} vouchers created from bank statement`);
   };
 
-  // Export to Tally XML format
-  const handleExportTally = () => {
+  // Export to Tally XML format - Enhanced with API
+  const handleExportTally = async () => {
     const verifiedVouchers = vouchers.filter(v => v.status === 'verified');
     
     if (verifiedVouchers.length === 0) {
@@ -218,19 +218,61 @@ const TallyEntry = () => {
       return;
     }
     
-    // Generate Tally-compatible XML
-    const tallyXML = generateTallyXML(verifiedVouchers);
-    
-    // Download file
-    const blob = new Blob([tallyXML], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tally_vouchers_${new Date().toISOString().split('T')[0]}.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    setSuccess('Tally XML exported successfully!');
+    try {
+      setUploading(true);
+      
+      // Call backend API for comprehensive XML generation
+      const response = await api.post('/tally/generate-xml', {
+        vouchers: verifiedVouchers.map(v => ({
+          date: v.date,
+          voucher_type: v.voucher_type,
+          voucher_number: v.voucher_number,
+          party_name: v.party_name,
+          debit_account: v.debit_account,
+          credit_account: v.credit_account,
+          amount: v.amount,
+          narration: v.narration,
+          reference: v.reference,
+          gstin: v.gstin,
+          gst_applicable: v.gst_applicable,
+          gst_rate: v.gst_rate,
+          cgst: v.cgst || 0,
+          sgst: v.sgst || 0,
+          igst: v.igst || 0,
+          total_amount: v.total_amount
+        })),
+        company_name: 'Your Company',
+        financial_year: '2024-25',
+        include_masters: true
+      });
+      
+      if (response.data.success) {
+        // Download XML file
+        const blob = new Blob([response.data.xml], { type: 'application/xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tally_vouchers_${new Date().toISOString().split('T')[0]}.xml`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        setSuccess(`Tally XML exported! ${response.data.stats.voucher_count} vouchers, Total: Rs.${response.data.stats.total_amount.toLocaleString('en-IN')}`);
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      // Fallback to local generation
+      const tallyXML = generateTallyXML(verifiedVouchers);
+      const blob = new Blob([tallyXML], { type: 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tally_vouchers_${new Date().toISOString().split('T')[0]}.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSuccess('Tally XML exported (local generation)');
+    } finally {
+      setUploading(false);
+    }
   };
 
   // Generate Tally XML
