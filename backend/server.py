@@ -3467,6 +3467,453 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==================== TALLY XML GENERATION ====================
+
+class TallyVoucher(BaseModel):
+    date: str
+    voucher_type: str
+    voucher_number: str
+    party_name: Optional[str] = None
+    debit_account: str
+    credit_account: str
+    amount: float
+    narration: Optional[str] = None
+    reference: Optional[str] = None
+    gstin: Optional[str] = None
+    gst_applicable: bool = False
+    gst_rate: Optional[int] = None
+    cgst: float = 0.0
+    sgst: float = 0.0
+    igst: float = 0.0
+    total_amount: float = 0.0
+
+class TallyExportRequest(BaseModel):
+    vouchers: List[TallyVoucher]
+    company_name: str = "Your Company"
+    financial_year: str = "2024-25"
+    include_masters: bool = True
+
+class TallyXMLGenerator:
+    """Generates comprehensive Tally-compatible XML files."""
+    
+    @staticmethod
+    def generate_complete_xml(vouchers: List[dict], company_name: str, financial_year: str, include_masters: bool = True) -> str:
+        """Generate complete Tally XML with vouchers and ledger masters."""
+        xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        xml += '<ENVELOPE>\n'
+        xml += '  <HEADER>\n'
+        xml += '    <TALLYREQUEST>Import Data</TALLYREQUEST>\n'
+        xml += '  </HEADER>\n'
+        xml += '  <BODY>\n'
+        xml += '    <IMPORTDATA>\n'
+        xml += '      <REQUESTDESC>\n'
+        xml += '        <REPORTNAME>Vouchers</REPORTNAME>\n'
+        xml += '      </REQUESTDESC>\n'
+        xml += '      <REQUESTDATA>\n'
+        
+        # Collect unique ledgers for master creation
+        ledgers_needed = set()
+        parties_needed = {}
+        
+        # Generate voucher entries
+        for v in vouchers:
+            voucher_type = v.get('voucher_type', 'receipt').upper()
+            date_str = v.get('date', '').replace('-', '')
+            
+            xml += '        <TALLYMESSAGE xmlns:UDF="TallyUDF">\n'
+            xml += f'          <VOUCHER VCHTYPE="{voucher_type}" ACTION="Create">\n'
+            xml += f'            <DATE>{date_str}</DATE>\n'
+            xml += f'            <VOUCHERTYPENAME>{voucher_type}</VOUCHERTYPENAME>\n'
+            xml += f'            <VOUCHERNUMBER>{v.get("voucher_number", "")}</VOUCHERNUMBER>\n'
+            
+            party_name = v.get('party_name', '')
+            if party_name:
+                xml += f'            <PARTYLEDGERNAME>{party_name}</PARTYLEDGERNAME>\n'
+                parties_needed[party_name] = v.get('gstin', '')
+            
+            xml += f'            <NARRATION>{v.get("narration", "")}</NARRATION>\n'
+            
+            debit_account = v.get('debit_account', '')
+            credit_account = v.get('credit_account', '')
+            amount = float(v.get('total_amount', 0) or v.get('amount', 0))
+            
+            ledgers_needed.add(debit_account)
+            ledgers_needed.add(credit_account)
+            
+            # Debit entry
+            xml += '            <ALLLEDGERENTRIES.LIST>\n'
+            xml += f'              <LEDGERNAME>{debit_account}</LEDGERNAME>\n'
+            xml += '              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>\n'
+            xml += f'              <AMOUNT>-{amount:.2f}</AMOUNT>\n'
+            xml += '            </ALLLEDGERENTRIES.LIST>\n'
+            
+            # Credit entry
+            xml += '            <ALLLEDGERENTRIES.LIST>\n'
+            xml += f'              <LEDGERNAME>{credit_account}</LEDGERNAME>\n'
+            xml += '              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>\n'
+            xml += f'              <AMOUNT>{amount:.2f}</AMOUNT>\n'
+            xml += '            </ALLLEDGERENTRIES.LIST>\n'
+            
+            # GST entries if applicable
+            if v.get('gst_applicable'):
+                cgst = float(v.get('cgst', 0))
+                sgst = float(v.get('sgst', 0))
+                igst = float(v.get('igst', 0))
+                gst_rate = v.get('gst_rate', 18)
+                
+                if cgst > 0:
+                    ledgers_needed.add(f'CGST @{gst_rate/2}%')
+                    xml += '            <ALLLEDGERENTRIES.LIST>\n'
+                    xml += f'              <LEDGERNAME>CGST @{gst_rate/2}%</LEDGERNAME>\n'
+                    xml += '              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>\n'
+                    xml += f'              <AMOUNT>{cgst:.2f}</AMOUNT>\n'
+                    xml += '            </ALLLEDGERENTRIES.LIST>\n'
+                
+                if sgst > 0:
+                    ledgers_needed.add(f'SGST @{gst_rate/2}%')
+                    xml += '            <ALLLEDGERENTRIES.LIST>\n'
+                    xml += f'              <LEDGERNAME>SGST @{gst_rate/2}%</LEDGERNAME>\n'
+                    xml += '              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>\n'
+                    xml += f'              <AMOUNT>{sgst:.2f}</AMOUNT>\n'
+                    xml += '            </ALLLEDGERENTRIES.LIST>\n'
+                
+                if igst > 0:
+                    ledgers_needed.add(f'IGST @{gst_rate}%')
+                    xml += '            <ALLLEDGERENTRIES.LIST>\n'
+                    xml += f'              <LEDGERNAME>IGST @{gst_rate}%</LEDGERNAME>\n'
+                    xml += '              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>\n'
+                    xml += f'              <AMOUNT>{igst:.2f}</AMOUNT>\n'
+                    xml += '            </ALLLEDGERENTRIES.LIST>\n'
+            
+            xml += '          </VOUCHER>\n'
+            xml += '        </TALLYMESSAGE>\n'
+        
+        # Add ledger masters if requested
+        if include_masters:
+            xml += '\n        <!-- LEDGER MASTERS -->\n'
+            for ledger in ledgers_needed:
+                if ledger:
+                    parent = TallyXMLGenerator._get_parent_group(ledger)
+                    xml += '        <TALLYMESSAGE xmlns:UDF="TallyUDF">\n'
+                    xml += f'          <LEDGER NAME="{ledger}" ACTION="Create">\n'
+                    xml += f'            <NAME>{ledger}</NAME>\n'
+                    xml += f'            <PARENT>{parent}</PARENT>\n'
+                    xml += '          </LEDGER>\n'
+                    xml += '        </TALLYMESSAGE>\n'
+            
+            # Add party masters with GSTIN
+            for party, gstin in parties_needed.items():
+                if party:
+                    xml += '        <TALLYMESSAGE xmlns:UDF="TallyUDF">\n'
+                    xml += f'          <LEDGER NAME="{party}" ACTION="Create">\n'
+                    xml += f'            <NAME>{party}</NAME>\n'
+                    xml += '            <PARENT>Sundry Debtors</PARENT>\n'
+                    xml += '            <GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>\n'
+                    if gstin:
+                        xml += f'            <PARTYGSTIN>{gstin}</PARTYGSTIN>\n'
+                    xml += '          </LEDGER>\n'
+                    xml += '        </TALLYMESSAGE>\n'
+        
+        xml += '      </REQUESTDATA>\n'
+        xml += '    </IMPORTDATA>\n'
+        xml += '  </BODY>\n'
+        xml += '</ENVELOPE>'
+        
+        return xml
+    
+    @staticmethod
+    def _get_parent_group(ledger_name: str) -> str:
+        """Determine parent group based on ledger name."""
+        name_lower = ledger_name.lower()
+        if any(x in name_lower for x in ['bank', 'hdfc', 'icici', 'sbi', 'axis', 'cash']):
+            return 'Bank Accounts' if 'bank' in name_lower or 'a/c' in name_lower else 'Cash-in-Hand'
+        elif any(x in name_lower for x in ['sales', 'income', 'revenue', 'service income']):
+            return 'Sales Accounts'
+        elif any(x in name_lower for x in ['purchase', 'buy']):
+            return 'Purchase Accounts'
+        elif any(x in name_lower for x in ['cgst', 'sgst', 'igst', 'gst', 'tax', 'duties']):
+            return 'Duties & Taxes'
+        elif any(x in name_lower for x in ['salary', 'wages', 'rent', 'utility', 'expense', 'travel', 'office']):
+            return 'Indirect Expenses'
+        elif any(x in name_lower for x in ['debtor', 'receivable']):
+            return 'Sundry Debtors'
+        elif any(x in name_lower for x in ['creditor', 'payable']):
+            return 'Sundry Creditors'
+        elif any(x in name_lower for x in ['loan', 'borrowing']):
+            return 'Loans (Liability)'
+        elif any(x in name_lower for x in ['asset', 'furniture', 'computer', 'vehicle', 'fixed']):
+            return 'Fixed Assets'
+        else:
+            return 'Sundry Debtors'
+
+@api_router.post("/tally/generate-xml")
+async def generate_tally_xml(
+    request: TallyExportRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate comprehensive Tally-compatible XML file for import."""
+    try:
+        vouchers_dict = [v.model_dump() for v in request.vouchers]
+        xml_content = TallyXMLGenerator.generate_complete_xml(
+            vouchers=vouchers_dict,
+            company_name=request.company_name,
+            financial_year=request.financial_year,
+            include_masters=request.include_masters
+        )
+        
+        return {
+            "success": True,
+            "xml": xml_content,
+            "stats": {
+                "voucher_count": len(request.vouchers),
+                "total_amount": sum(v.total_amount or v.amount for v in request.vouchers),
+                "company": request.company_name
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error generating Tally XML: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating Tally XML: {str(e)}")
+
+@api_router.post("/tally/generate-gst-xml")
+async def generate_gst_tally_xml(
+    filing_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate Tally XML from GST filing data - Complete GST entries with ITC, reversals, and payment."""
+    try:
+        # Fetch GST filing
+        filing = await db.gst_filings.find_one(
+            {"id": filing_id, "company_id": current_user["company"]["id"]},
+            {"_id": 0}
+        )
+        if not filing:
+            raise HTTPException(status_code=404, detail="GST filing not found")
+        
+        period = filing.get('period', '012025')
+        gstin = filing.get('gstin', '')
+        business_name = filing.get('business_name', 'Your Company')
+        
+        calc = filing.get('calculation', {})
+        output_tax = calc.get('output_tax', {})
+        itc = calc.get('input_tax_credit', {})
+        net_payable = calc.get('net_payable', {})
+        
+        vouchers = []
+        
+        # 1. Sales vouchers (rate-wise)
+        rate_breakdown = output_tax.get('rate_breakdown', {})
+        for rate_label, data in rate_breakdown.items():
+            taxable = data.get('taxable', 0)
+            tax = data.get('tax', 0)
+            if taxable > 0:
+                rate_val = float(rate_label.replace('%', ''))
+                vouchers.append({
+                    "date": f"{period[0:2]}15{period[2:]}",  # Mid-month
+                    "voucher_type": "sales",
+                    "voucher_number": f"GST-SALES-{rate_label}-{period}",
+                    "party_name": "Sundry Debtors",
+                    "debit_account": "Sundry Debtors",
+                    "credit_account": f"Sales @{rate_label}",
+                    "amount": taxable,
+                    "total_amount": taxable + tax,
+                    "narration": f"Sales @{rate_label} for {period}",
+                    "gst_applicable": True,
+                    "gst_rate": int(rate_val),
+                    "cgst": tax / 2,
+                    "sgst": tax / 2,
+                    "igst": 0
+                })
+        
+        # 2. Purchase vouchers with ITC
+        total_purchases = filing.get('total_purchases', 0)
+        total_itc = itc.get('total_itc', 0)
+        if total_purchases > 0:
+            vouchers.append({
+                "date": f"{period[0:2]}10{period[2:]}",
+                "voucher_type": "purchase",
+                "voucher_number": f"GST-PUR-{period}",
+                "party_name": "Sundry Creditors",
+                "debit_account": "Purchases",
+                "credit_account": "Sundry Creditors",
+                "amount": total_purchases,
+                "total_amount": total_purchases,
+                "narration": f"Purchases for {period} with ITC Rs.{total_itc:,.0f}",
+                "gst_applicable": False
+            })
+            
+            # ITC entry
+            if total_itc > 0:
+                vouchers.append({
+                    "date": f"{period[0:2]}31{period[2:]}",
+                    "voucher_type": "journal",
+                    "voucher_number": f"ITC-{period}",
+                    "party_name": None,
+                    "debit_account": "Input CGST",
+                    "credit_account": "Sundry Creditors",
+                    "amount": total_itc / 2,
+                    "total_amount": total_itc / 2,
+                    "narration": f"Input CGST for {period}",
+                    "gst_applicable": False
+                })
+                vouchers.append({
+                    "date": f"{period[0:2]}31{period[2:]}",
+                    "voucher_type": "journal",
+                    "voucher_number": f"ITC-SGST-{period}",
+                    "party_name": None,
+                    "debit_account": "Input SGST",
+                    "credit_account": "Sundry Creditors",
+                    "amount": total_itc / 2,
+                    "total_amount": total_itc / 2,
+                    "narration": f"Input SGST for {period}",
+                    "gst_applicable": False
+                })
+        
+        # 3. ITC Reversal entries (Rule 42/43)
+        reversed_itc = itc.get('reversed_itc', 0)
+        if reversed_itc > 0:
+            rule_42 = reversed_itc * 0.6
+            rule_43 = reversed_itc * 0.4
+            
+            vouchers.append({
+                "date": f"{period[0:2]}31{period[2:]}",
+                "voucher_type": "journal",
+                "voucher_number": f"REV-42-{period}",
+                "party_name": None,
+                "debit_account": "ITC Reversal - Rule 42",
+                "credit_account": "Input CGST",
+                "amount": rule_42 / 2,
+                "total_amount": rule_42,
+                "narration": f"Rule 42 reversal for common credit - {period}",
+                "gst_applicable": False
+            })
+            
+            vouchers.append({
+                "date": f"{period[0:2]}31{period[2:]}",
+                "voucher_type": "journal",
+                "voucher_number": f"REV-43-{period}",
+                "party_name": None,
+                "debit_account": "ITC Reversal - Rule 43",
+                "credit_account": "Input CGST",
+                "amount": rule_43 / 2,
+                "total_amount": rule_43,
+                "narration": f"Rule 43 reversal for capital goods - {period}",
+                "gst_applicable": False
+            })
+        
+        # 4. Blocked ITC (Section 17(5))
+        blocked_itc = itc.get('blocked_itc', 0)
+        if blocked_itc > 0:
+            vouchers.append({
+                "date": f"{period[0:2]}31{period[2:]}",
+                "voucher_type": "journal",
+                "voucher_number": f"BLK-17(5)-{period}",
+                "party_name": None,
+                "debit_account": "Blocked ITC - Section 17(5)",
+                "credit_account": "Purchases",
+                "amount": blocked_itc,
+                "total_amount": blocked_itc,
+                "narration": f"Section 17(5) blocked ITC for {period}",
+                "gst_applicable": False
+            })
+        
+        # 5. GST Payment voucher
+        cgst_payable = net_payable.get('cgst', 0)
+        sgst_payable = net_payable.get('sgst', 0)
+        total_payable = net_payable.get('total', 0)
+        
+        if total_payable > 0:
+            vouchers.append({
+                "date": f"{period[0:2]}20{period[2:]}",  # 20th of next month
+                "voucher_type": "payment",
+                "voucher_number": f"PMT-06-{period}",
+                "party_name": None,
+                "debit_account": "Output CGST",
+                "credit_account": "Bank Account",
+                "amount": cgst_payable,
+                "total_amount": cgst_payable,
+                "narration": f"CGST payment for {period} via PMT-06",
+                "gst_applicable": False
+            })
+            vouchers.append({
+                "date": f"{period[0:2]}20{period[2:]}",
+                "voucher_type": "payment",
+                "voucher_number": f"PMT-06-SGST-{period}",
+                "party_name": None,
+                "debit_account": "Output SGST",
+                "credit_account": "Bank Account",
+                "amount": sgst_payable,
+                "total_amount": sgst_payable,
+                "narration": f"SGST payment for {period} via PMT-06",
+                "gst_applicable": False
+            })
+        
+        # Generate XML
+        xml_content = TallyXMLGenerator.generate_complete_xml(
+            vouchers=vouchers,
+            company_name=business_name,
+            financial_year="2024-25",
+            include_masters=True
+        )
+        
+        # Summary report text
+        summary = f"""
+TALLY ENTRIES SUMMARY - {period}
+{business_name} ({gstin})
+Generated On: {datetime.now(timezone.utc).strftime('%d-%m-%Y %H:%M')}
+
+----------------------------------------------------------------------
+A. VOUCHERS CREATED
+----------------------------------------------------------------------
+Voucher Type    | Count | Total Value
+----------------|-------|-------------
+Sales           | {len([v for v in vouchers if v['voucher_type'] == 'sales'])}     | Rs.{sum(v['total_amount'] for v in vouchers if v['voucher_type'] == 'sales'):,.0f}
+Purchases       | {len([v for v in vouchers if v['voucher_type'] == 'purchase'])}     | Rs.{sum(v['total_amount'] for v in vouchers if v['voucher_type'] == 'purchase'):,.0f}
+Journals        | {len([v for v in vouchers if v['voucher_type'] == 'journal'])}     | Rs.{sum(v['total_amount'] for v in vouchers if v['voucher_type'] == 'journal'):,.0f}
+Payments        | {len([v for v in vouchers if v['voucher_type'] == 'payment'])}     | Rs.{sum(v['total_amount'] for v in vouchers if v['voucher_type'] == 'payment'):,.0f}
+----------------|-------|-------------
+TOTAL           | {len(vouchers)}     | Rs.{sum(v['total_amount'] for v in vouchers):,.0f}
+
+----------------------------------------------------------------------
+B. GST LEDGER SUMMARY
+----------------------------------------------------------------------
+Output CGST Liability     : Rs.{output_tax.get('cgst', 0):,.0f}
+Output SGST Liability     : Rs.{output_tax.get('sgst', 0):,.0f}
+Input CGST               : Rs.{total_itc/2:,.0f}
+Input SGST               : Rs.{total_itc/2:,.0f}
+ITC Reversals            : Rs.{reversed_itc:,.0f}
+Blocked ITC              : Rs.{blocked_itc:,.0f}
+
+----------------------------------------------------------------------
+C. NET TAX PAYABLE
+----------------------------------------------------------------------
+CGST Payable             : Rs.{cgst_payable:,.0f}
+SGST Payable             : Rs.{sgst_payable:,.0f}
+TOTAL GST PAYABLE        : Rs.{total_payable:,.0f}
+
+----------------------------------------------------------------------
+GENERATED BY: SuperCA AI Tax Assistant
+STATUS: Ready for Tally Import
+----------------------------------------------------------------------
+"""
+        
+        return {
+            "success": True,
+            "xml": xml_content,
+            "summary": summary,
+            "stats": {
+                "voucher_count": len(vouchers),
+                "total_amount": sum(v['total_amount'] for v in vouchers),
+                "company": business_name,
+                "period": period,
+                "net_gst_payable": total_payable
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating GST Tally XML: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating GST Tally XML: {str(e)}")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
