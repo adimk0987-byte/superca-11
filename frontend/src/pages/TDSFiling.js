@@ -15,6 +15,10 @@ const TDSFiling = () => {
   const [step, setStep] = useState(1); // 1: Setup, 2: Entry, 3: Results
   const [returnId, setReturnId] = useState(null);
   const [results, setResults] = useState(null);
+  const [uploadMode, setUploadMode] = useState(null); // 'deductees' or 'employees'
+  const [uploadErrors, setUploadErrors] = useState([]);
+  const deducteeFileRef = useRef(null);
+  const employeeFileRef = useRef(null);
   
   // Form data
   const [formData, setFormData] = useState({
@@ -26,6 +30,67 @@ const TDSFiling = () => {
     deductees: [],
     employees: []
   });
+
+  // Download Excel template
+  const downloadTemplate = async (dataType) => {
+    try {
+      const response = await api.get(`/tds/download-template?data_type=${dataType}`, {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `TDS_${dataType}_template.xlsx`;
+      link.click();
+    } catch (err) {
+      setError('Failed to download template');
+    }
+  };
+
+  // Upload Excel file
+  const handleFileUpload = async (e, dataType) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setLoading(true);
+    setUploadErrors([]);
+    setError('');
+    
+    const formDataUpload = new FormData();
+    formDataUpload.append('file', file);
+    
+    try {
+      const response = await api.post(`/tds/upload-excel?data_type=${dataType}`, formDataUpload, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      if (response.data.success) {
+        if (dataType === 'deductees') {
+          setFormData(prev => ({
+            ...prev,
+            deductees: [...prev.deductees, ...response.data.data]
+          }));
+        } else {
+          setFormData(prev => ({
+            ...prev,
+            employees: [...prev.employees, ...response.data.data]
+          }));
+        }
+        
+        setSuccess(`Uploaded ${response.data.total_rows} ${dataType} successfully!`);
+        
+        if (response.data.errors.length > 0) {
+          setUploadErrors(response.data.errors);
+        }
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to upload file');
+    } finally {
+      setLoading(false);
+      // Reset file input
+      e.target.value = '';
+    }
+  };
 
   // Load sample data
   const loadSampleData = async () => {
