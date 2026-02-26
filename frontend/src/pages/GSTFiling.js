@@ -271,6 +271,41 @@ const GSTFiling = () => {
     }
   };
 
+  // ============ EXPORT TO TALLY XML ============
+  const handleExportToTally = async () => {
+    if (!filingId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.post(`/tally/generate-gst-xml?filing_id=${filingId}`);
+      if (response.data.success) {
+        // Download XML
+        const blob = new Blob([response.data.xml], { type: 'application/xml' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `Tally_GST_${formData.period}.xml`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        // Also download summary as TXT
+        const summaryBlob = new Blob([response.data.summary], { type: 'text/plain' });
+        const summaryUrl = window.URL.createObjectURL(summaryBlob);
+        const summaryLink = document.createElement('a');
+        summaryLink.href = summaryUrl;
+        summaryLink.setAttribute('download', `Tally_Summary_${formData.period}.txt`);
+        document.body.appendChild(summaryLink);
+        summaryLink.click();
+        summaryLink.remove();
+      }
+    } catch (err) {
+      setError('Tally export failed: ' + (err.response?.data?.detail || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fmt = (val) => `Rs.${(parseFloat(val) || 0).toLocaleString('en-IN')}`;
   const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
 
