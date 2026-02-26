@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import api from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useAuth } from '../context/AuthContext';
+import api from '../lib/api';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import { 
   FileText, Download, AlertTriangle, CheckCircle, Users, 
   Building, Calculator, Landmark, RefreshCw, FileSpreadsheet,
