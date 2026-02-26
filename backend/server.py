@@ -3453,6 +3453,420 @@ Ensure debit and credit totals match (balanced trial balance). Use 0 for empty b
                 pass
 
 
+# ==================== TDS RETURN ENDPOINTS ====================
+from tds_engine.calculator import TDSCalculator, TDSReturnGenerator, TDSTallyExporter
+
+class TDSDeducteeInput(BaseModel):
+    name: str
+    pan: str
+    section: str  # 194C, 194J, 194I, 194A, etc.
+    invoice_no: str
+    date: str
+    amount: float
+    tds_rate: Optional[float] = None
+    is_company: bool = False
+    property_type: Optional[str] = None  # For 194I
+    month: Optional[str] = None
+
+class TDSEmployeeInput(BaseModel):
+    name: str
+    pan: str
+    designation: str
+    date_of_joining: str
+    monthly_salary: float
+    exemptions: dict = {}  # 80C, 80D, HRA, etc.
+
+class TDSCalculateRequest(BaseModel):
+    tan: str
+    pan: str
+    company_name: str
+    quarter: int  # 1, 2, 3, 4
+    financial_year: str  # "2024-25"
+    deductees: List[TDSDeducteeInput] = []
+    employees: List[TDSEmployeeInput] = []
+
+@api_router.post("/tds/calculate")
+async def calculate_tds_return(
+    request: TDSCalculateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Calculate comprehensive TDS return with Form 24Q and 26Q"""
+    try:
+        calculator = TDSCalculator()
+        generator = TDSReturnGenerator(
+            tan=request.tan,
+            pan=request.pan,
+            company_name=request.company_name,
+            quarter=request.quarter,
+            fy=request.financial_year
+        )
+        
+        # Process non-salary deductees (Form 26Q)
+        processed_deductees = []
+        for d in request.deductees:
+            if d.section == "194C":
+                calc = calculator.calculate_tds_194c(d.amount, d.is_company, bool(d.pan))
+            elif d.section == "194J":
+                calc = calculator.calculate_tds_194j(d.amount, False, bool(d.pan))
+            elif d.section == "194I":
+                calc = calculator.calculate_tds_194i(d.amount, d.property_type != "machinery", bool(d.pan))
+            elif d.section == "194A":
+                calc = calculator.calculate_tds_194a(d.amount, bool(d.pan))
+            else:
+                calc = {"tds_amount": d.amount * 0.1, "rate": 10.0}  # Default 10%
+            
+            processed_deductees.append({
+                "name": d.name,
+                "pan": d.pan,
+                "section": d.section,
+                "invoice_no": d.invoice_no,
+                "date": d.date,
+                "amount": d.amount,
+                "tds_rate": calc.get('rate', d.tds_rate or 10.0),
+                "tds_amount": calc.get('tds_amount', 0),
+                "month": d.month or "January",
+                "date_of_deduction": d.date,
+                "date_of_deposit": "",  # Will be filled
+                "challan_no": ""
+            })
+        
+        # Process salary employees (Form 24Q)
+        processed_employees = []
+        for e in request.employees:
+            annual_salary = e.monthly_salary * 12
+            calc = calculator.calculate_salary_tds(annual_salary, e.exemptions)
+            quarterly_tds = calc['total_annual_tax'] / 4
+            
+            processed_employees.append({
+                "name": e.name,
+                "pan": e.pan,
+                "designation": e.designation,
+                "date_of_joining": e.date_of_joining,
+                "monthly_salary": e.monthly_salary,
+                "quarterly_salary": e.monthly_salary * 3,
+                "annual_salary": annual_salary,
+                "exemptions": e.exemptions,
+                "taxable_income": calc['taxable_income'],
+                "annual_tax": calc['total_annual_tax'],
+                "monthly_tds": calc['monthly_tds'],
+                "tds_deducted": round(quarterly_tds, 2)
+            })
+        
+        # Generate Form 26Q
+        form_26q = generator.generate_form_26q(processed_deductees) if processed_deductees else None
+        
+        # Generate Form 24Q
+        form_24q = generator.generate_form_24q(processed_employees) if processed_employees else None
+        
+        # PAN Validation
+        all_entries = processed_deductees + processed_employees
+        pan_validation = generator.generate_pan_validation_report(all_entries)
+        
+        # 26AS Reconciliation
+        reconciliation_26as = generator.generate_26as_reconciliation(processed_deductees) if processed_deductees else None
+        
+        # Store the TDS return
+        tds_return_id = str(uuid.uuid4())
+        tds_return_data = {
+            "id": tds_return_id,
+            "company_id": current_user["company"]["id"],
+            "tan": request.tan,
+            "pan": request.pan,
+            "company_name": request.company_name,
+            "quarter": request.quarter,
+            "financial_year": request.financial_year,
+            "form_26q": form_26q,
+            "form_24q": form_24q,
+            "pan_validation": pan_validation,
+            "reconciliation_26as": reconciliation_26as,
+            "status": "calculated",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await db.tds_returns.insert_one(tds_return_data)
+        
+        # Calculate summaries
+        total_non_salary_tds = sum(d['tds_amount'] for d in processed_deductees)
+        total_salary_tds = sum(e['tds_deducted'] for e in processed_employees)
+        
+        return {
+            "success": True,
+            "return_id": tds_return_id,
+            "summary": {
+                "total_deductees": len(processed_deductees),
+                "total_employees": len(processed_employees),
+                "total_non_salary_payment": sum(d['amount'] for d in processed_deductees),
+                "total_salary_payment": sum(e['quarterly_salary'] for e in processed_employees),
+                "total_non_salary_tds": total_non_salary_tds,
+                "total_salary_tds": total_salary_tds,
+                "total_tds": total_non_salary_tds + total_salary_tds,
+                "due_date": generator._get_return_due_date()
+            },
+            "form_26q": form_26q,
+            "form_24q": form_24q,
+            "pan_validation": pan_validation,
+            "reconciliation_26as": reconciliation_26as,
+            "recommendations": [
+                "Verify all PANs before filing",
+                "Ensure all challans are deposited on time",
+                "Download 26AS and reconcile",
+                "Issue Form 16/16A to all deductees"
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error calculating TDS: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error calculating TDS: {str(e)}")
+
+@api_router.get("/tds/returns")
+async def get_tds_returns(current_user: dict = Depends(get_current_user)):
+    """Get all TDS returns for the company"""
+    returns = await db.tds_returns.find(
+        {"company_id": current_user["company"]["id"]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return returns
+
+@api_router.get("/tds/returns/{return_id}")
+async def get_tds_return(
+    return_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get specific TDS return"""
+    tds_return = await db.tds_returns.find_one(
+        {"id": return_id, "company_id": current_user["company"]["id"]},
+        {"_id": 0}
+    )
+    if not tds_return:
+        raise HTTPException(status_code=404, detail="TDS return not found")
+    return tds_return
+
+@api_router.post("/tds/returns/{return_id}/tally-xml")
+async def generate_tds_tally_xml(
+    return_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate Tally XML for TDS return"""
+    try:
+        tds_return = await db.tds_returns.find_one(
+            {"id": return_id, "company_id": current_user["company"]["id"]},
+            {"_id": 0}
+        )
+        if not tds_return:
+            raise HTTPException(status_code=404, detail="TDS return not found")
+        
+        form_26q = tds_return.get('form_26q', {})
+        deductees = form_26q.get('deductees', []) if form_26q else []
+        
+        exporter = TDSTallyExporter()
+        xml_content = exporter.generate_tds_vouchers(
+            deductees, 
+            tds_return.get('company_name', 'Company')
+        )
+        
+        # Summary
+        summary = f"""
+TDS TALLY ENTRIES SUMMARY
+{tds_return.get('company_name')} (TAN: {tds_return.get('tan')})
+Quarter: Q{tds_return.get('quarter')} | FY: {tds_return.get('financial_year')}
+
+VOUCHERS CREATED:
+- Payment vouchers: {len(deductees)}
+- TDS deposit vouchers: 3 (monthly)
+- Total entries: {len(deductees) + 3}
+
+LEDGER MASTERS INCLUDED:
+- TDS Payable - 194C (Contractors)
+- TDS Payable - 194J (Professional)
+- TDS Payable - 194I (Rent)
+- TDS Payable - 194A (Interest)
+- TDS Payable - 192 (Salary)
+
+READY FOR TALLY IMPORT
+"""
+        
+        return {
+            "success": True,
+            "xml": xml_content,
+            "summary": summary,
+            "stats": {
+                "voucher_count": len(deductees),
+                "total_tds": sum(d.get('tds_amount', 0) for d in deductees)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating TDS Tally XML: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@api_router.post("/tds/returns/{return_id}/traces-json")
+async def generate_traces_json(
+    return_id: str,
+    form_type: str = "26Q",
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate JSON ready for TRACES upload"""
+    try:
+        tds_return = await db.tds_returns.find_one(
+            {"id": return_id, "company_id": current_user["company"]["id"]},
+            {"_id": 0}
+        )
+        if not tds_return:
+            raise HTTPException(status_code=404, detail="TDS return not found")
+        
+        if form_type == "26Q":
+            form_data = tds_return.get('form_26q', {})
+        else:
+            form_data = tds_return.get('form_24q', {})
+        
+        # Format for TRACES
+        traces_json = {
+            "header": {
+                "tan": tds_return.get('tan'),
+                "pan": tds_return.get('pan'),
+                "returnType": "Original",
+                "quarter": str(tds_return.get('quarter')),
+                "financialYear": tds_return.get('financial_year'),
+                "formType": form_type
+            },
+            "deductorDetails": {
+                "name": tds_return.get('company_name'),
+                "address": "Address",
+                "email": "",
+                "mobile": ""
+            },
+            "deductees": form_data.get('deductees', []) if form_type == "26Q" else [],
+            "employees": form_data.get('employees', []) if form_type == "24Q" else [],
+            "summary": form_data.get('summary', {})
+        }
+        
+        return {
+            "success": True,
+            "json": traces_json,
+            "form_type": form_type
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating TRACES JSON: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Generate sample TDS data for demo
+@api_router.post("/tds/generate-sample")
+async def generate_sample_tds_data(
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate sample TDS data for demonstration"""
+    import random
+    
+    # Sample contractors
+    contractors = [
+        {"name": "Sharma Constructions", "pan": "ABMPS1234P"},
+        {"name": "Verma Engineers", "pan": "AVOPV5678Q"},
+        {"name": "Gupta & Sons", "pan": "AAAPG1234R"},
+        {"name": "Mehta Electricals", "pan": "AOPPM5678S"},
+        {"name": "Singh Transport", "pan": "ASOPS9012T"},
+        {"name": "Kumar Carpentry", "pan": "BOPMK3456U"},
+    ]
+    
+    # Sample professionals
+    professionals = [
+        {"name": "Legal Associates", "pan": "AAIFL7890V"},
+        {"name": "ABC Consultants", "pan": "AABCC1234W"},
+        {"name": "Tax Experts LLP", "pan": "AACTE5678X"},
+        {"name": "IT Solutions Pvt", "pan": "AAITS9012Y"},
+        {"name": "Audit Firm", "pan": "AAAAF3456Z"},
+    ]
+    
+    # Sample landlords
+    landlords = [
+        {"name": "Property Owner", "pan": "ABNOP1234A", "type": "Office Premises"},
+        {"name": "Landlord Singh", "pan": "ABCDS5678B", "type": "Godown"},
+        {"name": "Rani Properties", "pan": "ABBPR9012C", "type": "Staff Quarters"},
+    ]
+    
+    # Sample employees
+    employees = [
+        {"name": "Rajesh Kumar", "pan": "ABCPR1234K", "designation": "Manager", "salary": 80000},
+        {"name": "Priya Sharma", "pan": "BCDPS5678L", "designation": "Accountant", "salary": 60000},
+        {"name": "Amit Verma", "pan": "CDEAV9012M", "designation": "Executive", "salary": 50000},
+        {"name": "Neha Singh", "pan": "DEFNS3456N", "designation": "Assistant", "salary": 40000},
+        {"name": "Vikram Mehta", "pan": "EFGVM7890O", "designation": "Supervisor", "salary": 55000},
+        {"name": "Pooja Gupta", "pan": "FGHGP1234P", "designation": "HR", "salary": 65000},
+        {"name": "Sanjay Yadav", "pan": "GHISY5678Q", "designation": "Sales", "salary": 45000},
+        {"name": "Anjali Patel", "pan": "HIJAP9012R", "designation": "Admin", "salary": 36667},
+    ]
+    
+    deductees = []
+    months = ["January", "February", "March"]
+    
+    # Generate contractor payments
+    for i, c in enumerate(contractors):
+        deductees.append({
+            "name": c["name"],
+            "pan": c["pan"],
+            "section": "194C",
+            "invoice_no": f"CONT/{str(i+1).zfill(3)}",
+            "date": f"{random.randint(1, 28):02d}-0{random.randint(1, 3)}-2025",
+            "amount": random.randint(50, 500) * 1000,
+            "is_company": random.random() > 0.5,
+            "month": random.choice(months)
+        })
+    
+    # Generate professional payments
+    for i, p in enumerate(professionals):
+        deductees.append({
+            "name": p["name"],
+            "pan": p["pan"],
+            "section": "194J",
+            "invoice_no": f"PROF/{str(i+1).zfill(3)}",
+            "date": f"{random.randint(1, 28):02d}-0{random.randint(1, 3)}-2025",
+            "amount": random.randint(75, 220) * 1000,
+            "month": random.choice(months)
+        })
+    
+    # Generate rent payments
+    for i, l in enumerate(landlords):
+        deductees.append({
+            "name": l["name"],
+            "pan": l["pan"],
+            "section": "194I",
+            "invoice_no": f"RENT/{str(i+1).zfill(3)}",
+            "date": "31-03-2025",
+            "amount": random.randint(45, 90) * 1000,
+            "property_type": "building",
+            "month": "March"
+        })
+    
+    employee_list = []
+    for e in employees:
+        employee_list.append({
+            "name": e["name"],
+            "pan": e["pan"],
+            "designation": e["designation"],
+            "date_of_joining": "01-04-2020",
+            "monthly_salary": e["salary"],
+            "exemptions": {
+                "80C": random.randint(50, 150) * 1000,
+                "80D": random.randint(0, 25) * 1000,
+                "HRA": int(e["salary"] * 0.4 * 3),
+            }
+        })
+    
+    return {
+        "success": True,
+        "sample_data": {
+            "tan": "DELA12345B",
+            "pan": "AABCT1234F",
+            "company_name": "ABC Trading Co.",
+            "quarter": 4,
+            "financial_year": "2024-25",
+            "deductees": deductees,
+            "employees": employee_list
+        }
+    }
+
+
 # ==================== TALLY XML GENERATION ====================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
