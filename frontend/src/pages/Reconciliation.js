@@ -197,26 +197,28 @@ const Reconciliation = () => {
       if (response.data.success && response.data.data) {
         const data = response.data.data;
         
+        // Track uploaded file
+        setUploadedFiles(prev => ({ ...prev, [type]: file.name }));
+        
         if (type === 'bank') {
           setBankTransactions(data.transactions || []);
-          setSuccess('Bank statement extracted successfully!');
+          setSuccess(`Bank statement extracted: ${data.count || data.transactions?.length || 0} transactions`);
         } else if (type === 'sales') {
           setSalesInvoices(data.invoices || []);
-          setSuccess('Sales invoices extracted successfully!');
+          setSuccess(`Sales invoices extracted: ${data.count || data.invoices?.length || 0} invoices`);
         } else if (type === 'purchase') {
           setPurchaseInvoices(data.invoices || []);
-          setSuccess('Purchase invoices extracted successfully!');
+          setSuccess(`Purchase invoices extracted: ${data.count || data.invoices?.length || 0} invoices`);
         }
       } else {
-        setErrors(['Could not extract data from file']);
+        setErrors(['Could not extract data from file. Please check the format.']);
       }
     } catch (error) {
       console.error('Extraction error:', error);
-      // Use sample data on error
-      setSuccess(`Using sample ${type} data for demonstration`);
+      setErrors([`Error extracting ${type} data: ${error.response?.data?.detail || error.message}`]);
     } finally {
       setUploading(false);
-      setTimeout(() => setSuccess(''), 3000);
+      setTimeout(() => setSuccess(''), 5000);
     }
   };
 
