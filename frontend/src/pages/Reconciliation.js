@@ -4,7 +4,8 @@ import {
   Calculator, RefreshCw, Building2, Calendar, ArrowRight, ArrowLeft,
   ChevronRight, Sparkles, AlertCircle, TrendingUp, TrendingDown,
   Users, Wallet, FileSpreadsheet, Eye, Edit3, Trash2, Plus,
-  IndianRupee, Clock, Search, Filter, Check, X, CreditCard, Banknote
+  IndianRupee, Clock, Search, Filter, Check, X, CreditCard, Banknote,
+  Settings
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import api from '@/services/api';
