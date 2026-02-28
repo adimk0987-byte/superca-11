@@ -178,6 +178,49 @@ class VendorCreate(BaseModel):
     company: Optional[str] = None
     address: Optional[str] = None
 
+# Multi-tenancy: Client Companies (companies managed by a CA firm)
+class ClientCompany(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    ca_company_id: str  # The CA firm managing this client
+    name: str
+    legal_name: Optional[str] = None
+    pan: Optional[str] = None
+    gstin: Optional[str] = None
+    cin: Optional[str] = None
+    tan: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    financial_year_start: str = "04"  # April
+    industry: Optional[str] = None
+    company_type: str = "private_limited"  # private_limited, public_limited, llp, partnership, proprietorship
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ClientCompanyCreate(BaseModel):
+    name: str
+    legal_name: Optional[str] = None
+    pan: Optional[str] = None
+    gstin: Optional[str] = None
+    cin: Optional[str] = None
+    tan: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    financial_year_start: str = "04"
+    industry: Optional[str] = None
+    company_type: str = "private_limited"
+
 class InvoiceItem(BaseModel):
     description: str
     quantity: float
