@@ -305,6 +305,11 @@ class FinancialStatementsAPITester:
             print("\n❌ API not accessible. Stopping tests.")
             return False
         
+        # Test authentication
+        if not self.test_login():
+            print("\n❌ Authentication failed. Cannot proceed with authenticated endpoints.")
+            return False
+        
         # Run all tests
         self.test_ratio_calculation()
         self.test_financial_statements_crud()
