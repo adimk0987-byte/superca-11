@@ -641,6 +641,114 @@ const Reconciliation = () => {
             </div>
           </div>
 
+          {/* Matching Settings */}
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200">
+            <h3 className="text-lg font-semibold mb-4 flex items-center">
+              <Settings className="mr-2 text-slate-600" size={20} />
+              Matching Rules Configuration
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Date Tolerance */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Date Tolerance</label>
+                <select
+                  value={matchingSettings.date_tolerance_days}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, date_tolerance_days: parseInt(e.target.value)})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm"
+                >
+                  <option value={1}>Same day only (strict)</option>
+                  <option value={2}>Within 2 days</option>
+                  <option value={3}>Within 3 days (recommended)</option>
+                  <option value={5}>Within 5 days</option>
+                  <option value={7}>Within 7 days</option>
+                </select>
+              </div>
+              
+              {/* Amount Tolerance */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Amount Tolerance</label>
+                <select
+                  value={matchingSettings.amount_tolerance}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, amount_tolerance: parseFloat(e.target.value)})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm"
+                >
+                  <option value={0}>Exact match only</option>
+                  <option value={10}>Within ₹10</option>
+                  <option value={50}>Within ₹50</option>
+                  <option value={100}>Within ₹100 (recommended)</option>
+                  <option value={500}>Within ₹500</option>
+                </select>
+              </div>
+              
+              {/* Auto-Approval Level */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Auto-Approval</label>
+                <select
+                  value={matchingSettings.auto_approval_level}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, auto_approval_level: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm"
+                >
+                  <option value="high">High confidence only (90%+)</option>
+                  <option value="all">All suggested (70%+)</option>
+                  <option value="manual">Manual review for all</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-slate-200">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matchingSettings.enable_reference_matching}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, enable_reference_matching: e.target.checked})}
+                  className="rounded border-slate-300 text-green-600 focus:ring-green-500"
+                />
+                <span className="text-sm text-slate-700">Reference number matching</span>
+              </label>
+              
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matchingSettings.enable_name_matching}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, enable_name_matching: e.target.checked})}
+                  className="rounded border-slate-300 text-green-600 focus:ring-green-500"
+                />
+                <span className="text-sm text-slate-700">Name matching from description</span>
+              </label>
+              
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matchingSettings.enable_partial_payment_matching}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, enable_partial_payment_matching: e.target.checked})}
+                  className="rounded border-slate-300 text-green-600 focus:ring-green-500"
+                />
+                <span className="text-sm text-slate-700">Partial payment matching</span>
+              </label>
+              
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matchingSettings.enable_bulk_payment_matching}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, enable_bulk_payment_matching: e.target.checked})}
+                  className="rounded border-slate-300 text-green-600 focus:ring-green-500"
+                />
+                <span className="text-sm text-slate-700">Bulk payment matching</span>
+              </label>
+              
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={matchingSettings.auto_match_bank_charges}
+                  onChange={(e) => setMatchingSettings({...matchingSettings, auto_match_bank_charges: e.target.checked})}
+                  className="rounded border-slate-300 text-green-600 focus:ring-green-500"
+                />
+                <span className="text-sm text-slate-700">Auto-match bank charges</span>
+              </label>
+            </div>
+          </div>
+
           {/* Run Matching Button */}
           <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 text-center">
             <Button
