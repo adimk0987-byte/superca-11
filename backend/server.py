@@ -3833,6 +3833,313 @@ async def generate_financial_excel(data: dict, current_user: dict = Depends(get_
         logger.error(f"Excel generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ====== TALLY XML EXPORT ======
+
+@api_router.post("/financial/generate-tally-xml")
+async def generate_tally_xml(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate Tally-compatible XML for importing financial data"""
+    try:
+        import xml.etree.ElementTree as ET
+        from xml.dom import minidom
+        
+        company_name = data.get('company_name', 'Company')
+        financial_year = data.get('financial_year', '2024-25')
+        trial_balance = data.get('trial_balance', [])
+        journal_entries = data.get('journal_entries', [])
+        
+        # Create root element
+        root = ET.Element("ENVELOPE")
+        
+        # Header
+        header = ET.SubElement(root, "HEADER")
+        ET.SubElement(header, "TALLYREQUEST").text = "Import Data"
+        
+        # Body
+        body = ET.SubElement(root, "BODY")
+        import_data = ET.SubElement(body, "IMPORTDATA")
+        request_desc = ET.SubElement(import_data, "REQUESTDESC")
+        ET.SubElement(request_desc, "REPORTNAME").text = "All Masters"
+        static_vars = ET.SubElement(request_desc, "STATICVARIABLES")
+        ET.SubElement(static_vars, "SVCURRENTCOMPANY").text = company_name
+        
+        request_data = ET.SubElement(import_data, "REQUESTDATA")
+        
+        # Create ledger masters from trial balance
+        for item in trial_balance:
+            tallymsg = ET.SubElement(request_data, "TALLYMESSAGE", xmlns_UDF="TallyUDF")
+            ledger = ET.SubElement(tallymsg, "LEDGER", NAME=item.get('account_name', ''), ACTION="Create")
+            
+            # Determine parent group based on classification
+            classification = item.get('classification', 'Expenses')
+            parent_map = {
+                'Assets': 'Current Assets',
+                'Fixed Assets': 'Fixed Assets',
+                'Liabilities': 'Current Liabilities',
+                'Long-term Liabilities': 'Loans (Liability)',
+                'Equity': 'Capital Account',
+                'Revenue': 'Sales Accounts',
+                'Income': 'Direct Incomes',
+                'Expenses': 'Indirect Expenses',
+                'Cost of Goods Sold': 'Purchase Accounts',
+                'Direct Expenses': 'Direct Expenses'
+            }
+            parent = parent_map.get(classification, 'Indirect Expenses')
+            
+            ET.SubElement(ledger, "PARENT").text = parent
+            ET.SubElement(ledger, "ISBILLWISEON").text = "No"
+            ET.SubElement(ledger, "ISCOSTCENTRESON").text = "No"
+            
+            # Opening balance
+            opening = item.get('opening_balance', 0)
+            if opening != 0:
+                ET.SubElement(ledger, "OPENINGBALANCE").text = str(abs(opening)) + (" Dr" if opening > 0 else " Cr")
+        
+        # Create journal vouchers
+        for entry in journal_entries:
+            tallymsg = ET.SubElement(request_data, "TALLYMESSAGE", xmlns_UDF="TallyUDF")
+            voucher = ET.SubElement(tallymsg, "VOUCHER", VCHTYPE="Journal", ACTION="Create")
+            
+            ET.SubElement(voucher, "DATE").text = entry.get('date', '20240401')
+            ET.SubElement(voucher, "NARRATION").text = entry.get('narration', '')
+            ET.SubElement(voucher, "VOUCHERTYPENAME").text = "Journal"
+            
+            # Debit entries
+            for debit in entry.get('debits', []):
+                allledger = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
+                ET.SubElement(allledger, "LEDGERNAME").text = debit.get('account', '')
+                ET.SubElement(allledger, "ISDEEMEDPOSITIVE").text = "Yes"
+                ET.SubElement(allledger, "AMOUNT").text = f"-{debit.get('amount', 0)}"
+            
+            # Credit entries
+            for credit in entry.get('credits', []):
+                allledger = ET.SubElement(voucher, "ALLLEDGERENTRIES.LIST")
+                ET.SubElement(allledger, "LEDGERNAME").text = credit.get('account', '')
+                ET.SubElement(allledger, "ISDEEMEDPOSITIVE").text = "No"
+                ET.SubElement(allledger, "AMOUNT").text = str(credit.get('amount', 0))
+        
+        # Convert to pretty XML string
+        xml_str = ET.tostring(root, encoding='unicode')
+        pretty_xml = minidom.parseString(xml_str).toprettyxml(indent="  ")
+        
+        return Response(
+            content=pretty_xml.encode('utf-8'),
+            media_type="application/xml",
+            headers={"Content-Disposition": f"attachment; filename=Tally_Import_{company_name}_{financial_year}.xml"}
+        )
+    except Exception as e:
+        logger.error(f"Tally XML generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ====== PREVIOUS YEAR COMPARISON ======
+
+@api_router.post("/financial/compare-years")
+async def compare_financial_years(data: dict, current_user: dict = Depends(get_current_user)):
+    """Compare financial data between current and previous year"""
+    try:
+        current_year = data.get('current_year', {})
+        previous_year = data.get('previous_year', {})
+        
+        def calculate_change(current, previous):
+            if previous == 0:
+                return 100 if current > 0 else 0
+            return round(((current - previous) / abs(previous)) * 100, 2)
+        
+        # Compare P&L items
+        pnl_comparison = []
+        current_pnl = current_year.get('profit_and_loss', {})
+        previous_pnl = previous_year.get('profit_and_loss', {})
+        
+        pnl_items = ['revenue', 'cost_of_goods_sold', 'gross_profit', 'operating_expenses', 
+                     'operating_profit', 'other_income', 'finance_cost', 'depreciation', 
+                     'profit_before_tax', 'tax_expense', 'net_profit']
+        
+        for item in pnl_items:
+            curr_val = current_pnl.get(item, 0)
+            prev_val = previous_pnl.get(item, 0)
+            pnl_comparison.append({
+                'item': item.replace('_', ' ').title(),
+                'current_year': curr_val,
+                'previous_year': prev_val,
+                'change_amount': curr_val - prev_val,
+                'change_percent': calculate_change(curr_val, prev_val)
+            })
+        
+        # Compare Balance Sheet items
+        bs_comparison = []
+        current_bs = current_year.get('balance_sheet', {})
+        previous_bs = previous_year.get('balance_sheet', {})
+        
+        bs_items = ['share_capital', 'reserves_surplus', 'long_term_borrowings', 
+                    'current_liabilities', 'fixed_assets', 'investments', 
+                    'current_assets', 'cash_and_bank']
+        
+        for item in bs_items:
+            curr_val = current_bs.get(item, 0)
+            prev_val = previous_bs.get(item, 0)
+            bs_comparison.append({
+                'item': item.replace('_', ' ').title(),
+                'current_year': curr_val,
+                'previous_year': prev_val,
+                'change_amount': curr_val - prev_val,
+                'change_percent': calculate_change(curr_val, prev_val)
+            })
+        
+        # Compare Ratios
+        ratio_comparison = []
+        current_ratios = current_year.get('ratios', {})
+        previous_ratios = previous_year.get('ratios', {})
+        
+        ratio_items = ['current_ratio', 'quick_ratio', 'debt_equity_ratio', 
+                       'gross_profit_margin', 'net_profit_margin', 'return_on_equity',
+                       'return_on_assets', 'asset_turnover', 'inventory_turnover']
+        
+        for item in ratio_items:
+            curr_val = current_ratios.get(item, 0)
+            prev_val = previous_ratios.get(item, 0)
+            ratio_comparison.append({
+                'ratio': item.replace('_', ' ').title(),
+                'current_year': curr_val,
+                'previous_year': prev_val,
+                'change': round(curr_val - prev_val, 2),
+                'trend': 'up' if curr_val > prev_val else ('down' if curr_val < prev_val else 'stable')
+            })
+        
+        # Generate insights
+        insights = []
+        
+        # Revenue insight
+        rev_change = calculate_change(current_pnl.get('revenue', 0), previous_pnl.get('revenue', 0))
+        if rev_change > 10:
+            insights.append(f"Revenue grew by {rev_change}% - strong growth performance")
+        elif rev_change < -10:
+            insights.append(f"Revenue declined by {abs(rev_change)}% - needs attention")
+        
+        # Profit insight
+        np_change = calculate_change(current_pnl.get('net_profit', 0), previous_pnl.get('net_profit', 0))
+        if np_change > 15:
+            insights.append(f"Net profit improved by {np_change}% - excellent profitability")
+        elif np_change < -15:
+            insights.append(f"Net profit declined by {abs(np_change)}% - review cost structure")
+        
+        # Liquidity insight
+        curr_ratio = current_ratios.get('current_ratio', 0)
+        prev_ratio = previous_ratios.get('current_ratio', 0)
+        if curr_ratio < 1:
+            insights.append("Current ratio below 1 - liquidity concern")
+        elif curr_ratio > prev_ratio:
+            insights.append("Liquidity position improved")
+        
+        return {
+            "success": True,
+            "comparison": {
+                "profit_and_loss": pnl_comparison,
+                "balance_sheet": bs_comparison,
+                "ratios": ratio_comparison
+            },
+            "insights": insights,
+            "summary": {
+                "revenue_growth": calculate_change(current_pnl.get('revenue', 0), previous_pnl.get('revenue', 0)),
+                "profit_growth": calculate_change(current_pnl.get('net_profit', 0), previous_pnl.get('net_profit', 0)),
+                "asset_growth": calculate_change(
+                    current_bs.get('fixed_assets', 0) + current_bs.get('current_assets', 0),
+                    previous_bs.get('fixed_assets', 0) + previous_bs.get('current_assets', 0)
+                )
+            }
+        }
+    except Exception as e:
+        logger.error(f"Year comparison error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/financial/generate-comparison-pdf")
+async def generate_comparison_pdf(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate PDF with year-over-year comparison"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from io import BytesIO
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=50, bottomMargin=50)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle('Title', parent=styles['Title'], fontSize=18, spaceAfter=20)
+        heading_style = ParagraphStyle('Heading', parent=styles['Heading2'], fontSize=14, spaceAfter=10, spaceBefore=20)
+        
+        company_name = data.get('company_name', 'Company')
+        current_fy = data.get('current_financial_year', '2024-25')
+        previous_fy = data.get('previous_financial_year', '2023-24')
+        comparison = data.get('comparison', {})
+        
+        # Title
+        story.append(Paragraph(company_name, title_style))
+        story.append(Paragraph(f"Comparative Financial Statements: FY {previous_fy} vs FY {current_fy}", styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # P&L Comparison Table
+        story.append(Paragraph("Profit & Loss Comparison", heading_style))
+        pnl_data = [['Particulars', f'FY {previous_fy}', f'FY {current_fy}', 'Change', '%']]
+        for item in comparison.get('profit_and_loss', []):
+            pnl_data.append([
+                item['item'],
+                f"₹{item['previous_year']:,.0f}",
+                f"₹{item['current_year']:,.0f}",
+                f"₹{item['change_amount']:,.0f}",
+                f"{item['change_percent']:+.1f}%"
+            ])
+        
+        pnl_table = Table(pnl_data, colWidths=[180, 90, 90, 80, 60])
+        pnl_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ]))
+        story.append(pnl_table)
+        story.append(Spacer(1, 20))
+        
+        # Balance Sheet Comparison
+        story.append(Paragraph("Balance Sheet Comparison", heading_style))
+        bs_data = [['Particulars', f'FY {previous_fy}', f'FY {current_fy}', 'Change', '%']]
+        for item in comparison.get('balance_sheet', []):
+            bs_data.append([
+                item['item'],
+                f"₹{item['previous_year']:,.0f}",
+                f"₹{item['current_year']:,.0f}",
+                f"₹{item['change_amount']:,.0f}",
+                f"{item['change_percent']:+.1f}%"
+            ])
+        
+        bs_table = Table(bs_data, colWidths=[180, 90, 90, 80, 60])
+        bs_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16a34a')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0fdf4')]),
+        ]))
+        story.append(bs_table)
+        
+        # Build PDF
+        doc.build(story)
+        pdf_bytes = buffer.getvalue()
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=Comparison_{current_fy}_vs_{previous_fy}.pdf"}
+        )
+    except Exception as e:
+        logger.error(f"Comparison PDF error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ====== BANK & INVOICE RECONCILIATION ENDPOINTS ======
 
 class ReconciliationMatchSettings(BaseModel):
