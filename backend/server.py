@@ -15,12 +15,13 @@ import jwt
 from passlib.context import CryptContext
 from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
 import json
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, Form
 import base64
 from io import BytesIO
 from PIL import Image
 import tempfile
 import os as os_module
+import asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
