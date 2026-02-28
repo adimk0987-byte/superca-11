@@ -67,6 +67,12 @@ class FinancialStatementsAPITester:
             self.log_test("API Status Check", False, str(e))
             return False
 
+    def get_auth_headers(self):
+        """Get authorization headers"""
+        if self.token:
+            return {"Authorization": f"Bearer {self.token}"}
+        return {}
+
     def test_ratio_calculation(self):
         """Test financial ratio calculation endpoint"""
         try:
@@ -89,7 +95,9 @@ class FinancialStatementsAPITester:
             }
             
             response = requests.post(f"{self.base_url}/financial/calculate-ratios", 
-                                   json=test_data, timeout=15)
+                                   json=test_data, 
+                                   headers=self.get_auth_headers(),
+                                   timeout=15)
             success = response.status_code == 200
             
             if success:
