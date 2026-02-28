@@ -3467,6 +3467,244 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ============= FINANCIAL STATEMENT ENDPOINTS =============
+
+@api_router.post("/financial/calculate-ratios")
+async def calculate_financial_ratios(data: dict, current_user: dict = Depends(get_current_user)):
+    """Calculate financial ratios from statement data"""
+    try:
+        # Extract values
+        current_assets = data.get('current_assets', 0)
+        current_liabilities = data.get('current_liabilities', 0) or 1
+        inventory = data.get('inventory', 0)
+        cash = data.get('cash', 0)
+        total_assets = data.get('total_assets', 0) or 1
+        total_equity = data.get('total_equity', 0) or 1
+        total_debt = data.get('total_debt', 0)
+        revenue = data.get('revenue', 0) or 1
+        gross_profit = data.get('gross_profit', 0)
+        operating_profit = data.get('operating_profit', 0)
+        net_profit = data.get('net_profit', 0)
+        interest_expense = data.get('interest_expense', 1) or 1
+        cost_of_goods_sold = data.get('cost_of_goods_sold', 0)
+        trade_receivables = data.get('trade_receivables', 0) or 1
+        trade_payables = data.get('trade_payables', 0) or 1
+        
+        # Profitability Ratios
+        gross_profit_margin = (gross_profit / revenue * 100) if revenue > 0 else 0
+        operating_profit_margin = (operating_profit / revenue * 100) if revenue > 0 else 0
+        net_profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
+        roe = (net_profit / total_equity * 100) if total_equity > 0 else 0
+        roa = (net_profit / total_assets * 100) if total_assets > 0 else 0
+        
+        # Liquidity Ratios
+        current_ratio = (current_assets / current_liabilities) if current_liabilities > 0 else 0
+        quick_ratio = ((current_assets - inventory) / current_liabilities) if current_liabilities > 0 else 0
+        cash_ratio = (cash / current_liabilities) if current_liabilities > 0 else 0
+        
+        # Solvency Ratios
+        debt_equity_ratio = (total_debt / total_equity) if total_equity > 0 else 0
+        interest_coverage = (operating_profit / interest_expense) if interest_expense > 0 else 0
+        
+        # Efficiency Ratios
+        inventory_val = inventory if inventory > 0 else 1
+        inventory_turnover = (cost_of_goods_sold / inventory_val) if inventory_val > 0 else 0
+        debtors_turnover = (revenue / trade_receivables) if trade_receivables > 0 else 0
+        creditors_turnover = (cost_of_goods_sold / trade_payables) if trade_payables > 0 else 0
+        working_capital = current_assets - current_liabilities
+        working_capital_turnover = (revenue / working_capital) if working_capital > 0 else 0
+        
+        ratios = {
+            "profitability": {
+                "gross_profit_margin": round(gross_profit_margin, 2),
+                "operating_profit_margin": round(operating_profit_margin, 2),
+                "net_profit_margin": round(net_profit_margin, 2),
+                "return_on_equity": round(roe, 2),
+                "return_on_assets": round(roa, 2)
+            },
+            "liquidity": {
+                "current_ratio": round(current_ratio, 2),
+                "quick_ratio": round(quick_ratio, 2),
+                "cash_ratio": round(cash_ratio, 2)
+            },
+            "solvency": {
+                "debt_equity_ratio": round(debt_equity_ratio, 2),
+                "interest_coverage_ratio": round(interest_coverage, 2)
+            },
+            "efficiency": {
+                "inventory_turnover": round(inventory_turnover, 2),
+                "debtors_turnover": round(debtors_turnover, 2),
+                "creditors_turnover": round(creditors_turnover, 2),
+                "working_capital_turnover": round(working_capital_turnover, 2)
+            }
+        }
+        
+        return {"success": True, "ratios": ratios}
+    except Exception as e:
+        logger.error(f"Ratio calculation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/financial/generate-pdf")
+async def generate_financial_pdf(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate financial statements PDF package"""
+    from fastapi.responses import Response
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from io import BytesIO
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20*mm, leftMargin=20*mm, topMargin=20*mm, bottomMargin=20*mm)
+        
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name='Title2', parent=styles['Heading1'], fontSize=16, spaceAfter=12, alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name='Subtitle', parent=styles['Heading2'], fontSize=12, spaceAfter=8))
+        
+        story = []
+        
+        company_name = data.get('company_name', 'Company Name')
+        financial_year = data.get('financial_year', '2024-25')
+        
+        # Cover Page
+        story.append(Paragraph(company_name.upper(), styles['Title2']))
+        story.append(Paragraph(f"Financial Statements for FY {financial_year}", styles['Subtitle']))
+        story.append(Spacer(1, 24))
+        
+        # Balance Sheet
+        balance_sheet = data.get('balance_sheet', {})
+        if balance_sheet:
+            story.append(Paragraph("BALANCE SHEET", styles['Title2']))
+            story.append(Paragraph(f"As on {data.get('period_end_date', '31st March 2025')}", styles['Subtitle']))
+            story.append(Spacer(1, 12))
+            
+            bs_data = [['Particulars', 'Amount (Rs.)']]
+            bs_data.append(['ASSETS', ''])
+            bs_data.append(['Total Assets', f"{balance_sheet.get('total_assets', 0):,.2f}"])
+            bs_data.append(['', ''])
+            bs_data.append(['EQUITY & LIABILITIES', ''])
+            bs_data.append(['Total Equity & Liabilities', f"{balance_sheet.get('total_liabilities', 0):,.2f}"])
+            
+            bs_table = Table(bs_data, colWidths=[350, 120])
+            bs_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c5282')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            story.append(bs_table)
+            story.append(PageBreak())
+        
+        # Profit & Loss
+        profit_loss = data.get('profit_loss', {})
+        if profit_loss:
+            story.append(Paragraph("STATEMENT OF PROFIT AND LOSS", styles['Title2']))
+            story.append(Spacer(1, 12))
+            
+            pl_data = [['Particulars', 'Amount (Rs.)']]
+            pl_data.append(['Revenue from Operations', f"{profit_loss.get('revenue', 0):,.2f}"])
+            pl_data.append(['Total Income', f"{profit_loss.get('total_income', profit_loss.get('revenue', 0)):,.2f}"])
+            pl_data.append(['Total Expenses', f"{profit_loss.get('total_expenses', 0):,.2f}"])
+            pl_data.append(['Profit Before Tax', f"{profit_loss.get('profit_before_tax', 0):,.2f}"])
+            pl_data.append(['Profit After Tax', f"{profit_loss.get('net_profit', 0):,.2f}"])
+            
+            pl_table = Table(pl_data, colWidths=[350, 120])
+            pl_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c5282')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ]))
+            story.append(pl_table)
+            story.append(PageBreak())
+        
+        # Ratio Analysis
+        ratios = data.get('ratios', {})
+        if ratios:
+            story.append(Paragraph("FINANCIAL RATIO ANALYSIS", styles['Title2']))
+            story.append(Spacer(1, 12))
+            
+            for category, category_ratios in ratios.items():
+                if isinstance(category_ratios, dict):
+                    story.append(Paragraph(category.replace('_', ' ').title() + " Ratios", styles['Subtitle']))
+                    ratio_data = [['Ratio', 'Value']]
+                    for ratio_name, value in category_ratios.items():
+                        ratio_data.append([ratio_name.replace('_', ' ').title(), f"{value}"])
+                    
+                    ratio_table = Table(ratio_data, colWidths=[350, 120])
+                    ratio_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4a5568')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 9),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ]))
+                    story.append(ratio_table)
+                    story.append(Spacer(1, 12))
+        
+        # Footer
+        story.append(Spacer(1, 24))
+        story.append(Paragraph(f"Generated on: {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}", styles['Normal']))
+        
+        doc.build(story)
+        pdf_bytes = buffer.getvalue()
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=Financial_Statements_{financial_year}.pdf"}
+        )
+    except Exception as e:
+        logger.error(f"PDF generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/financial/generate-excel")
+async def generate_financial_excel(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate financial statements Excel package"""
+    from fastapi.responses import Response
+    try:
+        import pandas as pd
+        from io import BytesIO
+        
+        buffer = BytesIO()
+        
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            # Trial Balance
+            trial_balance = data.get('trial_balance', [])
+            if trial_balance:
+                tb_df = pd.DataFrame(trial_balance)
+                tb_df.to_excel(writer, sheet_name='Trial Balance', index=False)
+            
+            # Ratios
+            ratios = data.get('ratios', {})
+            if ratios:
+                ratio_rows = []
+                for category, cat_ratios in ratios.items():
+                    if isinstance(cat_ratios, dict):
+                        for ratio_name, value in cat_ratios.items():
+                            ratio_rows.append({'Category': category, 'Ratio': ratio_name, 'Value': value})
+                if ratio_rows:
+                    ratio_df = pd.DataFrame(ratio_rows)
+                    ratio_df.to_excel(writer, sheet_name='Ratios', index=False)
+        
+        excel_bytes = buffer.getvalue()
+        financial_year = data.get('financial_year', '2024-25')
+        
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=Financial_Statements_{financial_year}.xlsx"}
+        )
+    except Exception as e:
+        logger.error(f"Excel generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
