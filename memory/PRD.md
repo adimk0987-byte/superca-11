@@ -45,6 +45,12 @@ Build a complete CA automation platform with two major modules:
 - `/api/reconciliation/generate-pdf` - Bank Reconciliation Statement PDF
 - `/api/reconciliation/generate-excel` - Reconciliation Excel workbook
 
+### File Parsing (IMPLEMENTED)
+- **CSV**: Direct pandas parsing with auto-column mapping
+- **Excel (.xlsx, .xls)**: Pandas Excel reader with column normalization
+- **PDF**: Gemini AI extraction with structured JSON output
+- Supported columns: Date, Reference, Description, Debit, Credit (bank); Invoice No, Customer/Vendor, Date, Amount (invoices)
+
 ### Matching Engine (8 Priorities)
 | Priority | Match Type | Confidence |
 |----------|------------|------------|
