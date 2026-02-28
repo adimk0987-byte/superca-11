@@ -800,6 +800,90 @@ async def get_subscription(current_user: dict = Depends(get_current_user)):
         "pricing": PRICING
     }
 
+# ====== MULTI-TENANCY: CLIENT COMPANIES ======
+# These are companies managed by the CA firm (not the CA firm itself)
+
+@api_router.post("/client-companies", response_model=ClientCompany)
+async def create_client_company(input: ClientCompanyCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new client company under the CA firm"""
+    await check_permission(current_user, UserRole.ACCOUNTANT)
+    client = ClientCompany(ca_company_id=current_user["company"]["id"], **input.model_dump())
+    await db.client_companies.insert_one(serialize_doc(client.model_dump()))
+    return client
+
+@api_router.get("/client-companies", response_model=List[ClientCompany])
+async def get_client_companies(current_user: dict = Depends(get_current_user)):
+    """Get all client companies managed by the CA firm"""
+    clients = await db.client_companies.find(
+        {"ca_company_id": current_user["company"]["id"], "is_active": True}, 
+        {"_id": 0}
+    ).to_list(1000)
+    return [deserialize_doc(c) for c in clients]
+
+@api_router.get("/client-companies/{client_id}", response_model=ClientCompany)
+async def get_client_company(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a specific client company"""
+    client = await db.client_companies.find_one(
+        {"id": client_id, "ca_company_id": current_user["company"]["id"]}, 
+        {"_id": 0}
+    )
+    if not client:
+        raise HTTPException(status_code=404, detail="Client company not found")
+    return deserialize_doc(client)
+
+@api_router.put("/client-companies/{client_id}", response_model=ClientCompany)
+async def update_client_company(client_id: str, input: ClientCompanyCreate, current_user: dict = Depends(get_current_user)):
+    """Update a client company"""
+    await check_permission(current_user, UserRole.ACCOUNTANT)
+    update_data = input.model_dump()
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    result = await db.client_companies.update_one(
+        {"id": client_id, "ca_company_id": current_user["company"]["id"]},
+        {"$set": update_data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client company not found")
+    
+    updated = await db.client_companies.find_one({"id": client_id}, {"_id": 0})
+    return deserialize_doc(updated)
+
+@api_router.delete("/client-companies/{client_id}")
+async def delete_client_company(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Soft delete a client company"""
+    await check_permission(current_user, UserRole.ADMIN)
+    result = await db.client_companies.update_one(
+        {"id": client_id, "ca_company_id": current_user["company"]["id"]},
+        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client company not found")
+    return {"message": "Client company deleted"}
+
+@api_router.get("/client-companies/{client_id}/summary")
+async def get_client_company_summary(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Get summary data for a client company"""
+    client = await db.client_companies.find_one(
+        {"id": client_id, "ca_company_id": current_user["company"]["id"]}, 
+        {"_id": 0}
+    )
+    if not client:
+        raise HTTPException(status_code=404, detail="Client company not found")
+    
+    # Get counts
+    invoices_count = await db.invoices.count_documents({"client_company_id": client_id})
+    gst_filings = await db.gst_filings.count_documents({"client_company_id": client_id})
+    itr_filings = await db.itr_filings.count_documents({"client_company_id": client_id})
+    
+    return {
+        "client": deserialize_doc(client),
+        "stats": {
+            "invoices": invoices_count,
+            "gst_filings": gst_filings,
+            "itr_filings": itr_filings
+        }
+    }
+
 # Customer Routes (with multi-tenancy)
 @api_router.post("/customers", response_model=Customer)
 async def create_customer(input: CustomerCreate, current_user: dict = Depends(get_current_user)):
