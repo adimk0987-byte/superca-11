@@ -13,6 +13,7 @@ class FinancialStatementsAPITester:
         self.tests_run = 0
         self.tests_passed = 0
         self.errors = []
+        self.token = None
 
     def log_test(self, name, success, error=None):
         """Log test result"""
