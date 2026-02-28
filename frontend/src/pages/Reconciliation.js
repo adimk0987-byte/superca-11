@@ -68,6 +68,13 @@ const Reconciliation = () => {
   const [activeFilter, setActiveFilter] = useState('all');
   const [activeMismatchTab, setActiveMismatchTab] = useState('partial');
   
+  // Uploaded files tracking
+  const [uploadedFiles, setUploadedFiles] = useState({
+    bank: null,
+    sales: null,
+    purchase: null
+  });
+  
   // Context
   const [context, setContext] = useState({
     company_name: '',
