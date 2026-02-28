@@ -52,11 +52,20 @@ class FinancialStatementsAPITester:
             self.log_test("Login Authentication", False, str(e))
             return False
 
-    def get_auth_headers(self):
-        """Get authorization headers"""
-        if self.token:
-            return {"Authorization": f"Bearer {self.token}"}
-        return {}
+    def test_api_status(self):
+        """Test basic API connectivity"""
+        try:
+            response = requests.get(f"{self.base_url}/", timeout=10)
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                success = "FinanceOps" in data.get("message", "")
+            self.log_test("API Status Check", success, 
+                         None if success else f"Status: {response.status_code}")
+            return success
+        except Exception as e:
+            self.log_test("API Status Check", False, str(e))
+            return False
 
     def test_ratio_calculation(self):
         """Test financial ratio calculation endpoint"""
