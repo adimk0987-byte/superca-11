@@ -570,13 +570,24 @@ const Reconciliation = () => {
           {/* Upload Files */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Bank Statement */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border-2 border-dashed border-slate-300 hover:border-green-500 transition-colors">
+            <div className={`bg-white rounded-xl shadow-sm p-6 border-2 transition-colors ${
+              uploadedFiles.bank ? 'border-green-500 border-solid' : 'border-dashed border-slate-300 hover:border-green-500'
+            }`}>
               <div className="text-center">
-                <div className="w-16 h-16 mx-auto rounded-full bg-green-100 flex items-center justify-center mb-4">
-                  <Banknote size={32} className="text-green-600" />
+                <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${
+                  uploadedFiles.bank ? 'bg-green-500' : 'bg-green-100'
+                }`}>
+                  {uploadedFiles.bank ? <CheckCircle size={32} className="text-white" /> : <Banknote size={32} className="text-green-600" />}
                 </div>
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Bank Statement</h3>
-                <p className="text-sm text-slate-600 mb-4">Excel, CSV, or PDF</p>
+                {uploadedFiles.bank ? (
+                  <div className="mb-4">
+                    <p className="text-sm text-green-600 font-medium truncate" title={uploadedFiles.bank}>{uploadedFiles.bank}</p>
+                    <p className="text-xs text-slate-500">{bankTransactions.length} transactions loaded</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600 mb-4">Excel, CSV, or PDF</p>
+                )}
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv,.pdf"
@@ -585,25 +596,38 @@ const Reconciliation = () => {
                   id="bank-upload"
                 />
                 <label htmlFor="bank-upload">
-                  <Button className="bg-green-600 hover:bg-green-700" disabled={uploading} asChild>
+                  <Button className={uploadedFiles.bank ? "bg-green-500 hover:bg-green-600" : "bg-green-600 hover:bg-green-700"} disabled={uploading} asChild>
                     <span>
-                      {uploading ? <RefreshCw size={16} className="mr-1 animate-spin" /> : <Upload size={16} className="mr-1" />}
-                      Upload
+                      {uploading ? <RefreshCw size={16} className="mr-1 animate-spin" /> : uploadedFiles.bank ? <CheckCircle size={16} className="mr-1" /> : <Upload size={16} className="mr-1" />}
+                      {uploadedFiles.bank ? 'Re-upload' : 'Upload'}
                     </span>
                   </Button>
                 </label>
-                <p className="text-xs text-green-600 mt-2 font-medium">Required</p>
+                <p className={`text-xs mt-2 font-medium ${uploadedFiles.bank ? 'text-green-600' : 'text-green-600'}`}>
+                  {uploadedFiles.bank ? 'Uploaded' : 'Required'}
+                </p>
               </div>
             </div>
 
             {/* Sales Invoices */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border-2 border-dashed border-slate-300 hover:border-blue-500 transition-colors">
+            <div className={`bg-white rounded-xl shadow-sm p-6 border-2 transition-colors ${
+              uploadedFiles.sales ? 'border-blue-500 border-solid' : 'border-dashed border-slate-300 hover:border-blue-500'
+            }`}>
               <div className="text-center">
-                <div className="w-16 h-16 mx-auto rounded-full bg-blue-100 flex items-center justify-center mb-4">
-                  <TrendingUp size={32} className="text-blue-600" />
+                <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${
+                  uploadedFiles.sales ? 'bg-blue-500' : 'bg-blue-100'
+                }`}>
+                  {uploadedFiles.sales ? <CheckCircle size={32} className="text-white" /> : <TrendingUp size={32} className="text-blue-600" />}
                 </div>
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Sales Invoices</h3>
-                <p className="text-sm text-slate-600 mb-4">Excel, CSV, or PDF</p>
+                {uploadedFiles.sales ? (
+                  <div className="mb-4">
+                    <p className="text-sm text-blue-600 font-medium truncate" title={uploadedFiles.sales}>{uploadedFiles.sales}</p>
+                    <p className="text-xs text-slate-500">{salesInvoices.length} invoices loaded</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600 mb-4">Excel, CSV, or PDF</p>
+                )}
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv,.pdf"
@@ -612,25 +636,38 @@ const Reconciliation = () => {
                   id="sales-upload"
                 />
                 <label htmlFor="sales-upload">
-                  <Button className="bg-blue-600 hover:bg-blue-700" disabled={uploading} asChild>
+                  <Button className={uploadedFiles.sales ? "bg-blue-500 hover:bg-blue-600" : "bg-blue-600 hover:bg-blue-700"} disabled={uploading} asChild>
                     <span>
-                      {uploading ? <RefreshCw size={16} className="mr-1 animate-spin" /> : <Upload size={16} className="mr-1" />}
-                      Upload
+                      {uploading ? <RefreshCw size={16} className="mr-1 animate-spin" /> : uploadedFiles.sales ? <CheckCircle size={16} className="mr-1" /> : <Upload size={16} className="mr-1" />}
+                      {uploadedFiles.sales ? 'Re-upload' : 'Upload'}
                     </span>
                   </Button>
                 </label>
-                <p className="text-xs text-blue-600 mt-2 font-medium">Required</p>
+                <p className={`text-xs mt-2 font-medium ${uploadedFiles.sales ? 'text-blue-600' : 'text-blue-600'}`}>
+                  {uploadedFiles.sales ? 'Uploaded' : 'Required'}
+                </p>
               </div>
             </div>
 
             {/* Purchase Invoices */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border-2 border-dashed border-slate-300 hover:border-purple-500 transition-colors">
+            <div className={`bg-white rounded-xl shadow-sm p-6 border-2 transition-colors ${
+              uploadedFiles.purchase ? 'border-purple-500 border-solid' : 'border-dashed border-slate-300 hover:border-purple-500'
+            }`}>
               <div className="text-center">
-                <div className="w-16 h-16 mx-auto rounded-full bg-purple-100 flex items-center justify-center mb-4">
-                  <TrendingDown size={32} className="text-purple-600" />
+                <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 ${
+                  uploadedFiles.purchase ? 'bg-purple-500' : 'bg-purple-100'
+                }`}>
+                  {uploadedFiles.purchase ? <CheckCircle size={32} className="text-white" /> : <TrendingDown size={32} className="text-purple-600" />}
                 </div>
                 <h3 className="text-lg font-semibold text-slate-900 mb-2">Purchase Invoices</h3>
-                <p className="text-sm text-slate-600 mb-4">Excel, CSV, or PDF</p>
+                {uploadedFiles.purchase ? (
+                  <div className="mb-4">
+                    <p className="text-sm text-purple-600 font-medium truncate" title={uploadedFiles.purchase}>{uploadedFiles.purchase}</p>
+                    <p className="text-xs text-slate-500">{purchaseInvoices.length} invoices loaded</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600 mb-4">Excel, CSV, or PDF</p>
+                )}
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv,.pdf"
@@ -639,14 +676,16 @@ const Reconciliation = () => {
                   id="purchase-upload"
                 />
                 <label htmlFor="purchase-upload">
-                  <Button className="bg-purple-600 hover:bg-purple-700" disabled={uploading} asChild>
+                  <Button className={uploadedFiles.purchase ? "bg-purple-500 hover:bg-purple-600" : "bg-purple-600 hover:bg-purple-700"} disabled={uploading} asChild>
                     <span>
-                      {uploading ? <RefreshCw size={16} className="mr-1 animate-spin" /> : <Upload size={16} className="mr-1" />}
-                      Upload
+                      {uploading ? <RefreshCw size={16} className="mr-1 animate-spin" /> : uploadedFiles.purchase ? <CheckCircle size={16} className="mr-1" /> : <Upload size={16} className="mr-1" />}
+                      {uploadedFiles.purchase ? 'Re-upload' : 'Upload'}
                     </span>
                   </Button>
                 </label>
-                <p className="text-xs text-purple-600 mt-2 font-medium">Required</p>
+                <p className={`text-xs mt-2 font-medium ${uploadedFiles.purchase ? 'text-purple-600' : 'text-purple-600'}`}>
+                  {uploadedFiles.purchase ? 'Uploaded' : 'Optional'}
+                </p>
               </div>
             </div>
           </div>
