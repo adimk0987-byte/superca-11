@@ -3705,6 +3705,761 @@ async def generate_financial_excel(data: dict, current_user: dict = Depends(get_
         logger.error(f"Excel generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ====== BANK & INVOICE RECONCILIATION ENDPOINTS ======
+
+class ReconciliationMatchSettings(BaseModel):
+    date_tolerance_days: int = 3
+    amount_tolerance: float = 100
+    enable_reference_matching: bool = True
+    enable_name_matching: bool = True
+    enable_partial_payment_matching: bool = True
+    enable_bulk_payment_matching: bool = True
+    auto_match_bank_charges: bool = True
+    auto_approval_level: str = "high"  # high (P1-P2), all (>90%), manual
+
+class ReconciliationMatchResult(BaseModel):
+    match_type: str
+    priority: int
+    confidence: float
+    bank_txn_id: str
+    invoice_ids: List[str]
+    matched_amount: float
+    difference: float
+    reason: str
+
+def normalize_reference(ref: str) -> str:
+    """Normalize reference numbers for comparison"""
+    if not ref:
+        return ""
+    return ''.join(filter(str.isalnum, ref.upper()))
+
+def parse_date(date_str: str):
+    """Parse date string to datetime"""
+    if isinstance(date_str, datetime):
+        return date_str
+    for fmt in ['%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d']:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except:
+            continue
+    return None
+
+def days_between(date1, date2) -> int:
+    """Calculate days between two dates"""
+    d1 = parse_date(date1) if isinstance(date1, str) else date1
+    d2 = parse_date(date2) if isinstance(date2, str) else date2
+    if d1 and d2:
+        return abs((d1 - d2).days)
+    return 999
+
+def name_contains(description: str, names: List[str]) -> bool:
+    """Check if description contains any of the names"""
+    if not description:
+        return False
+    desc_upper = description.upper()
+    for name in names:
+        if name and name.upper() in desc_upper:
+            return True
+    return False
+
+def run_reconciliation_matching(
+    bank_transactions: List[dict],
+    invoices: List[dict],
+    settings: ReconciliationMatchSettings
+) -> dict:
+    """
+    Run the 8-priority matching engine for bank reconciliation
+    Returns matched, suggested, manual review, and unmatched items
+    """
+    matches = []
+    unmatched_bank = bank_transactions.copy()
+    unmatched_invoices = invoices.copy()
+    
+    def remove_matched_bank(txn_id):
+        nonlocal unmatched_bank
+        unmatched_bank = [t for t in unmatched_bank if str(t.get('id', t.get('_id', ''))) != str(txn_id)]
+    
+    def remove_matched_invoice(inv_id):
+        nonlocal unmatched_invoices
+        unmatched_invoices = [i for i in unmatched_invoices if str(i.get('id', i.get('_id', ''))) != str(inv_id)]
+    
+    # PRIORITY 1: Reference Number Match (100% confidence)
+    if settings.enable_reference_matching:
+        for txn in list(unmatched_bank):
+            txn_ref = normalize_reference(txn.get('ref', '') or txn.get('reference', '') or txn.get('cheque_no', '') or txn.get('utr', ''))
+            if not txn_ref:
+                continue
+            for inv in list(unmatched_invoices):
+                inv_refs = [
+                    normalize_reference(inv.get('cheque_no', '')),
+                    normalize_reference(inv.get('utr', '')),
+                    normalize_reference(inv.get('payment_ref', '')),
+                    normalize_reference(inv.get('reference', ''))
+                ]
+                if txn_ref in inv_refs and txn_ref:
+                    bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+                    inv_amount = float(inv.get('amount', 0))
+                    matches.append({
+                        'match_type': 'reference',
+                        'priority': 1,
+                        'confidence': 100,
+                        'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                        'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                        'matched_amount': bank_amount,
+                        'bank_amount': bank_amount,
+                        'invoice_amount': inv_amount,
+                        'difference': bank_amount - inv_amount,
+                        'reason': f'Reference match: {txn_ref}',
+                        'bank_date': txn.get('date'),
+                        'invoice_date': inv.get('date'),
+                        'description': txn.get('description', ''),
+                        'customer': inv.get('customer', inv.get('vendor', ''))
+                    })
+                    remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                    remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                    break
+    
+    # PRIORITY 2: Exact Amount + Close Date (95% confidence)
+    for txn in list(unmatched_bank):
+        bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+        if bank_amount == 0:
+            continue
+        for inv in list(unmatched_invoices):
+            inv_amount = float(inv.get('amount', 0))
+            if abs(bank_amount - inv_amount) < 0.01:  # Exact match
+                days = days_between(txn.get('date'), inv.get('date'))
+                if days <= settings.date_tolerance_days:
+                    matches.append({
+                        'match_type': 'exact_amount_close_date',
+                        'priority': 2,
+                        'confidence': 95,
+                        'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                        'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                        'matched_amount': bank_amount,
+                        'bank_amount': bank_amount,
+                        'invoice_amount': inv_amount,
+                        'difference': 0,
+                        'reason': f'Exact amount match within {days} days',
+                        'bank_date': txn.get('date'),
+                        'invoice_date': inv.get('date'),
+                        'description': txn.get('description', ''),
+                        'customer': inv.get('customer', inv.get('vendor', ''))
+                    })
+                    remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                    remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                    break
+    
+    # PRIORITY 3: Exact Amount + Name Match (85% confidence)
+    if settings.enable_name_matching:
+        for txn in list(unmatched_bank):
+            bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+            description = txn.get('description', '')
+            if bank_amount == 0:
+                continue
+            for inv in list(unmatched_invoices):
+                inv_amount = float(inv.get('amount', 0))
+                customer_name = inv.get('customer', inv.get('vendor', ''))
+                if abs(bank_amount - inv_amount) < 0.01 and name_contains(description, [customer_name]):
+                    matches.append({
+                        'match_type': 'exact_amount_name_match',
+                        'priority': 3,
+                        'confidence': 85,
+                        'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                        'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                        'matched_amount': bank_amount,
+                        'bank_amount': bank_amount,
+                        'invoice_amount': inv_amount,
+                        'difference': 0,
+                        'reason': f'Amount match + name "{customer_name}" in description',
+                        'bank_date': txn.get('date'),
+                        'invoice_date': inv.get('date'),
+                        'description': description,
+                        'customer': customer_name
+                    })
+                    remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                    remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                    break
+    
+    # PRIORITY 4: Exact Amount + Wider Date (80% confidence)
+    for txn in list(unmatched_bank):
+        bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+        if bank_amount == 0:
+            continue
+        for inv in list(unmatched_invoices):
+            inv_amount = float(inv.get('amount', 0))
+            if abs(bank_amount - inv_amount) < 0.01:
+                days = days_between(txn.get('date'), inv.get('date'))
+                if days <= 7:
+                    matches.append({
+                        'match_type': 'exact_amount_wider_date',
+                        'priority': 4,
+                        'confidence': 80,
+                        'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                        'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                        'matched_amount': bank_amount,
+                        'bank_amount': bank_amount,
+                        'invoice_amount': inv_amount,
+                        'difference': 0,
+                        'reason': f'Exact amount match, {days} days apart',
+                        'bank_date': txn.get('date'),
+                        'invoice_date': inv.get('date'),
+                        'description': txn.get('description', ''),
+                        'customer': inv.get('customer', inv.get('vendor', ''))
+                    })
+                    remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                    remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                    break
+    
+    # PRIORITY 5: Bank Charges/Interest (90% confidence)
+    if settings.auto_match_bank_charges:
+        charge_keywords = ['CHARGE', 'COMMISSION', 'FEE', 'INTEREST', 'SERVICE', 'MAINTENANCE']
+        for txn in list(unmatched_bank):
+            description = (txn.get('description', '') or '').upper()
+            if any(kw in description for kw in charge_keywords):
+                bank_amount = float(txn.get('debit', 0) or txn.get('credit', 0) or txn.get('amount', 0) or 0)
+                for inv in list(unmatched_invoices):
+                    inv_amount = float(inv.get('amount', 0))
+                    if abs(bank_amount - inv_amount) <= settings.amount_tolerance:
+                        matches.append({
+                            'match_type': 'bank_charges',
+                            'priority': 5,
+                            'confidence': 90,
+                            'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                            'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                            'matched_amount': bank_amount,
+                            'bank_amount': bank_amount,
+                            'invoice_amount': inv_amount,
+                            'difference': bank_amount - inv_amount,
+                            'reason': 'Bank charges/interest match',
+                            'bank_date': txn.get('date'),
+                            'invoice_date': inv.get('date'),
+                            'description': txn.get('description', ''),
+                            'customer': 'Bank Charges'
+                        })
+                        remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                        remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                        break
+    
+    # PRIORITY 6: Exact Amount + Any Date (60% confidence)
+    for txn in list(unmatched_bank):
+        bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+        if bank_amount == 0:
+            continue
+        for inv in list(unmatched_invoices):
+            inv_amount = float(inv.get('amount', 0))
+            if abs(bank_amount - inv_amount) < 0.01:
+                days = days_between(txn.get('date'), inv.get('date'))
+                matches.append({
+                    'match_type': 'exact_amount_any_date',
+                    'priority': 6,
+                    'confidence': 60,
+                    'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                    'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                    'matched_amount': bank_amount,
+                    'bank_amount': bank_amount,
+                    'invoice_amount': inv_amount,
+                    'difference': 0,
+                    'reason': f'Exact amount match, {days} days apart (manual review)',
+                    'bank_date': txn.get('date'),
+                    'invoice_date': inv.get('date'),
+                    'description': txn.get('description', ''),
+                    'customer': inv.get('customer', inv.get('vendor', ''))
+                })
+                remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                break
+    
+    # PRIORITY 7: Partial Payment Match (70% confidence)
+    if settings.enable_partial_payment_matching:
+        for txn in list(unmatched_bank):
+            bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+            if bank_amount == 0:
+                continue
+            for inv in list(unmatched_invoices):
+                inv_amount = float(inv.get('amount', 0))
+                if inv_amount > 0 and bank_amount < inv_amount and bank_amount > (inv_amount * 0.5):
+                    days = days_between(txn.get('date'), inv.get('date'))
+                    if days <= 7:
+                        diff = inv_amount - bank_amount
+                        tds_rate = (diff / inv_amount) * 100
+                        reason = 'Partial payment'
+                        if 9 <= tds_rate <= 11:
+                            reason = 'Likely TDS @10% deducted'
+                        elif 1 <= tds_rate <= 3:
+                            reason = 'Likely TDS @2% deducted'
+                        elif tds_rate <= 5:
+                            reason = 'Likely discount given'
+                        matches.append({
+                            'match_type': 'partial_payment',
+                            'priority': 7,
+                            'confidence': 70,
+                            'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                            'invoice_ids': [str(inv.get('id', inv.get('_id', '')))],
+                            'matched_amount': bank_amount,
+                            'bank_amount': bank_amount,
+                            'invoice_amount': inv_amount,
+                            'difference': diff,
+                            'reason': reason,
+                            'bank_date': txn.get('date'),
+                            'invoice_date': inv.get('date'),
+                            'description': txn.get('description', ''),
+                            'customer': inv.get('customer', inv.get('vendor', ''))
+                        })
+                        remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                        remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                        break
+    
+    # PRIORITY 8: Bulk Payment Match (75% confidence)
+    if settings.enable_bulk_payment_matching:
+        for txn in list(unmatched_bank):
+            bank_amount = float(txn.get('credit', 0) or txn.get('amount', 0) or 0)
+            if bank_amount == 0:
+                continue
+            # Group invoices by customer
+            customer_invoices = {}
+            for inv in unmatched_invoices:
+                cust = inv.get('customer', inv.get('vendor', 'Unknown'))
+                if cust not in customer_invoices:
+                    customer_invoices[cust] = []
+                customer_invoices[cust].append(inv)
+            
+            # Check if sum of invoices matches bank amount
+            for cust, invs in customer_invoices.items():
+                if len(invs) < 2:
+                    continue
+                sorted_invs = sorted(invs, key=lambda x: x.get('date', ''))
+                for i in range(len(sorted_invs)):
+                    for j in range(i + 1, min(i + 5, len(sorted_invs) + 1)):
+                        subset = sorted_invs[i:j]
+                        total = sum(float(inv.get('amount', 0)) for inv in subset)
+                        if abs(total - bank_amount) < 1:
+                            inv_ids = [str(inv.get('id', inv.get('_id', ''))) for inv in subset]
+                            matches.append({
+                                'match_type': 'bulk_payment',
+                                'priority': 8,
+                                'confidence': 75,
+                                'bank_txn_id': str(txn.get('id', txn.get('_id', ''))),
+                                'invoice_ids': inv_ids,
+                                'matched_amount': bank_amount,
+                                'bank_amount': bank_amount,
+                                'invoice_amount': total,
+                                'difference': 0,
+                                'reason': f'Bulk payment for {len(subset)} invoices from {cust}',
+                                'bank_date': txn.get('date'),
+                                'invoice_date': subset[0].get('date'),
+                                'description': txn.get('description', ''),
+                                'customer': cust
+                            })
+                            remove_matched_bank(txn.get('id', txn.get('_id', '')))
+                            for inv in subset:
+                                remove_matched_invoice(inv.get('id', inv.get('_id', '')))
+                            break
+                    else:
+                        continue
+                    break
+    
+    # Categorize matches
+    auto_matched = [m for m in matches if m['confidence'] >= 90]
+    suggested = [m for m in matches if 70 <= m['confidence'] < 90]
+    manual_review = [m for m in matches if m['confidence'] < 70]
+    
+    # Calculate summary stats
+    total_bank = sum(float(t.get('credit', 0) or t.get('amount', 0) or 0) for t in bank_transactions)
+    total_invoices = sum(float(i.get('amount', 0)) for i in invoices)
+    matched_amount = sum(m['matched_amount'] for m in matches)
+    
+    return {
+        'auto_matched': auto_matched,
+        'suggested': suggested,
+        'manual_review': manual_review,
+        'unmatched_bank': unmatched_bank,
+        'unmatched_invoices': unmatched_invoices,
+        'summary': {
+            'total_transactions': len(bank_transactions),
+            'total_invoices': len(invoices),
+            'auto_matched_count': len(auto_matched),
+            'auto_matched_amount': sum(m['matched_amount'] for m in auto_matched),
+            'suggested_count': len(suggested),
+            'suggested_amount': sum(m['matched_amount'] for m in suggested),
+            'manual_review_count': len(manual_review),
+            'manual_review_amount': sum(m['matched_amount'] for m in manual_review),
+            'unmatched_bank_count': len(unmatched_bank),
+            'unmatched_bank_amount': sum(float(t.get('credit', 0) or t.get('amount', 0) or 0) for t in unmatched_bank),
+            'unmatched_invoices_count': len(unmatched_invoices),
+            'unmatched_invoices_amount': sum(float(i.get('amount', 0)) for i in unmatched_invoices),
+            'total_bank_amount': total_bank,
+            'total_invoice_amount': total_invoices,
+            'matched_amount': matched_amount,
+            'difference': abs(total_bank - total_invoices),
+            'match_percentage': round((matched_amount / total_bank * 100) if total_bank > 0 else 0, 2)
+        }
+    }
+
+@api_router.post("/reconciliation/run-matching")
+async def run_reconciliation(data: dict, current_user: dict = Depends(get_current_user)):
+    """Run the AI-powered reconciliation matching engine"""
+    try:
+        bank_transactions = data.get('bank_transactions', [])
+        invoices = data.get('invoices', [])
+        settings_data = data.get('settings', {})
+        
+        settings = ReconciliationMatchSettings(**settings_data)
+        
+        result = run_reconciliation_matching(bank_transactions, invoices, settings)
+        
+        return {
+            "success": True,
+            "data": result
+        }
+    except Exception as e:
+        logger.error(f"Reconciliation matching error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/reconciliation/extract")
+async def extract_reconciliation_data(
+    file: UploadFile = File(...),
+    type: str = Form("bank"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Extract data from uploaded files for reconciliation"""
+    try:
+        content = await file.read()
+        filename = file.filename.lower()
+        
+        # Handle different file types
+        if filename.endswith('.csv'):
+            import pandas as pd
+            import io
+            df = pd.read_csv(io.BytesIO(content))
+            records = df.to_dict('records')
+        elif filename.endswith(('.xlsx', '.xls')):
+            import pandas as pd
+            import io
+            df = pd.read_excel(io.BytesIO(content))
+            records = df.to_dict('records')
+        else:
+            # Use Gemini AI to extract from PDF or other formats
+            gemini_key = os.environ.get('GEMINI_API_KEY')
+            if not gemini_key:
+                raise HTTPException(status_code=500, detail="Gemini API key not configured")
+            
+            from emergentintegrations.llm.gemini import GeminiChat
+            
+            chat = GeminiChat(
+                api_key=gemini_key,
+                model="gemini-2.0-flash",
+                session_id=f"reconciliation_{current_user['user']['id']}_{datetime.now().timestamp()}",
+                system_message="You are an expert at extracting financial data from documents."
+            )
+            
+            prompt = f"""Extract the {type} data from this document. Return as JSON array with these fields:
+            For bank statements: [{{date, ref, description, debit, credit}}]
+            For sales invoices: [{{invoice_no, customer, date, amount}}]
+            For purchase invoices: [{{invoice_no, vendor, date, amount}}]
+            
+            Return ONLY valid JSON array, no other text."""
+            
+            response = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: chat.send_message(prompt)
+            )
+            
+            import json
+            import re
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                records = json.loads(json_match.group())
+            else:
+                records = []
+        
+        # Standardize field names
+        standardized = []
+        for i, record in enumerate(records):
+            if type == 'bank':
+                standardized.append({
+                    'id': i + 1,
+                    'date': str(record.get('date', record.get('Date', record.get('VALUE DATE', '')))),
+                    'ref': str(record.get('ref', record.get('Reference', record.get('REF NO', record.get('Cheque No', ''))))),
+                    'description': str(record.get('description', record.get('Description', record.get('PARTICULARS', record.get('Narration', ''))))),
+                    'debit': float(record.get('debit', record.get('Debit', record.get('WITHDRAWAL', 0))) or 0),
+                    'credit': float(record.get('credit', record.get('Credit', record.get('DEPOSIT', 0))) or 0),
+                    'status': 'unmatched'
+                })
+            elif type == 'sales':
+                standardized.append({
+                    'id': i + 1,
+                    'invoice_no': str(record.get('invoice_no', record.get('Invoice No', record.get('Invoice', f'INV-{i+1}')))),
+                    'customer': str(record.get('customer', record.get('Customer', record.get('Party Name', '')))),
+                    'date': str(record.get('date', record.get('Date', record.get('Invoice Date', '')))),
+                    'amount': float(record.get('amount', record.get('Amount', record.get('Total', 0))) or 0),
+                    'status': 'unpaid'
+                })
+            elif type == 'purchase':
+                standardized.append({
+                    'id': i + 1,
+                    'invoice_no': str(record.get('invoice_no', record.get('Invoice No', record.get('Bill No', f'PUR-{i+1}')))),
+                    'vendor': str(record.get('vendor', record.get('Vendor', record.get('Supplier', '')))),
+                    'date': str(record.get('date', record.get('Date', record.get('Bill Date', '')))),
+                    'amount': float(record.get('amount', record.get('Amount', record.get('Total', 0))) or 0),
+                    'status': 'unpaid'
+                })
+        
+        return {
+            "success": True,
+            "data": {
+                "transactions" if type == 'bank' else "invoices": standardized,
+                "count": len(standardized)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Reconciliation extraction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/reconciliation/generate-pdf")
+async def generate_reconciliation_pdf(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate Bank Reconciliation Statement PDF"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from io import BytesIO
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=50, bottomMargin=50)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Title styles
+        title_style = ParagraphStyle('Title', parent=styles['Title'], fontSize=18, spaceAfter=20, textColor=colors.HexColor('#1e293b'))
+        subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor('#64748b'))
+        heading_style = ParagraphStyle('Heading', parent=styles['Heading2'], fontSize=14, spaceAfter=10, spaceBefore=20)
+        
+        company_name = data.get('company_name', 'Company Name')
+        bank_name = data.get('bank_name', 'Bank Name')
+        account_number = data.get('account_number', '')
+        period = data.get('period', {})
+        summary = data.get('summary', {})
+        brs = data.get('brs', {})
+        
+        # Header
+        story.append(Paragraph(company_name, title_style))
+        story.append(Paragraph(f"Bank Reconciliation Statement", subtitle_style))
+        story.append(Paragraph(f"{bank_name} - A/c: {account_number}", subtitle_style))
+        story.append(Paragraph(f"Period: {period.get('from', '')} to {period.get('to', '')}", subtitle_style))
+        story.append(Spacer(1, 20))
+        
+        # Summary Table
+        story.append(Paragraph("Reconciliation Summary", heading_style))
+        summary_data = [
+            ['Description', 'Count', 'Amount (₹)'],
+            ['Auto Matched (High Confidence)', str(summary.get('fully_matched', {}).get('count', 0)), f"₹{summary.get('fully_matched', {}).get('amount', 0):,.2f}"],
+            ['Suggested Matches', str(summary.get('partial_matches', {}).get('count', 0)), f"₹{summary.get('partial_matches', {}).get('amount', 0):,.2f}"],
+            ['In Bank Only (Unmatched)', str(summary.get('bank_only', {}).get('count', 0)), f"₹{summary.get('bank_only', {}).get('amount', 0):,.2f}"],
+            ['In Books Only (Unmatched)', str(summary.get('books_only', {}).get('count', 0)), f"₹{summary.get('books_only', {}).get('amount', 0):,.2f}"],
+            ['Amount Mismatch', str(summary.get('amount_mismatch', {}).get('count', 0)), f"₹{summary.get('amount_mismatch', {}).get('amount', 0):,.2f}"],
+            ['Date Mismatch', str(summary.get('date_mismatch', {}).get('count', 0)), f"₹{summary.get('date_mismatch', {}).get('amount', 0):,.2f}"],
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[250, 80, 120])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 20))
+        
+        # BRS Statement
+        story.append(Paragraph("Bank Reconciliation Statement", heading_style))
+        
+        brs_data = [
+            ['Particulars', 'Amount (₹)'],
+            ['Balance as per Bank Statement', f"₹{brs.get('bank_balance', 0):,.2f}"],
+        ]
+        
+        # Add cheques not presented
+        cheques_not_presented = brs.get('cheques_not_presented', [])
+        if cheques_not_presented:
+            brs_data.append(['ADD: Cheques issued but not presented', ''])
+            total_not_presented = 0
+            for chq in cheques_not_presented:
+                brs_data.append([f"  Chq No. {chq.get('cheque_no', '')} - {chq.get('party', '')}", f"+₹{chq.get('amount', 0):,.2f}"])
+                total_not_presented += chq.get('amount', 0)
+            brs_data.append(['Total Additions', f"+₹{total_not_presented:,.2f}"])
+        
+        # Add cheques not cleared
+        cheques_not_cleared = brs.get('cheques_not_cleared', [])
+        if cheques_not_cleared:
+            brs_data.append(['LESS: Cheques deposited but not cleared', ''])
+            total_not_cleared = 0
+            for chq in cheques_not_cleared:
+                brs_data.append([f"  Chq No. {chq.get('cheque_no', '')} - {chq.get('party', '')}", f"-₹{chq.get('amount', 0):,.2f}"])
+                total_not_cleared += chq.get('amount', 0)
+            brs_data.append(['Total Deductions', f"-₹{total_not_cleared:,.2f}"])
+        
+        brs_data.append(['Balance as per Books', f"₹{brs.get('book_balance', 0):,.2f}"])
+        
+        brs_table = Table(brs_data, colWidths=[350, 100])
+        brs_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16a34a')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f0fdf4')),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ]))
+        story.append(brs_table)
+        
+        # Build PDF
+        doc.build(story)
+        pdf_bytes = buffer.getvalue()
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=BRS_{period.get('from', 'report')}_{period.get('to', '')}.pdf"}
+        )
+    except Exception as e:
+        logger.error(f"Reconciliation PDF error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/reconciliation/generate-excel")
+async def generate_reconciliation_excel(data: dict, current_user: dict = Depends(get_current_user)):
+    """Generate reconciliation Excel report"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Fill, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from io import BytesIO
+        
+        wb = Workbook()
+        
+        # Summary Sheet
+        ws_summary = wb.active
+        ws_summary.title = "Summary"
+        
+        header_fill = PatternFill(start_color="1e293b", end_color="1e293b", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        green_fill = PatternFill(start_color="dcfce7", end_color="dcfce7", fill_type="solid")
+        
+        company_name = data.get('company_name', 'Company Name')
+        summary = data.get('summary', {})
+        
+        ws_summary['A1'] = company_name
+        ws_summary['A1'].font = Font(size=16, bold=True)
+        ws_summary['A2'] = "Bank Reconciliation Summary"
+        ws_summary['A2'].font = Font(size=14)
+        
+        summary_headers = ['Category', 'Count', 'Amount']
+        for col, header in enumerate(summary_headers, 1):
+            cell = ws_summary.cell(row=4, column=col, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        summary_rows = [
+            ['Bank Statement Total', '', summary.get('bank_total', 0)],
+            ['Books Total', '', summary.get('books_total', 0)],
+            ['Fully Matched', summary.get('fully_matched', {}).get('count', 0), summary.get('fully_matched', {}).get('amount', 0)],
+            ['Partial Matches', summary.get('partial_matches', {}).get('count', 0), summary.get('partial_matches', {}).get('amount', 0)],
+            ['In Bank Only', summary.get('bank_only', {}).get('count', 0), summary.get('bank_only', {}).get('amount', 0)],
+            ['In Books Only', summary.get('books_only', {}).get('count', 0), summary.get('books_only', {}).get('amount', 0)],
+            ['Difference', '', summary.get('difference', 0)],
+            ['Match Percentage', '', f"{summary.get('match_percentage', 0)}%"],
+        ]
+        
+        for row_idx, row_data in enumerate(summary_rows, 5):
+            for col_idx, value in enumerate(row_data, 1):
+                ws_summary.cell(row=row_idx, column=col_idx, value=value)
+        
+        # Bank Transactions Sheet
+        ws_bank = wb.create_sheet("Bank Transactions")
+        bank_headers = ['Date', 'Reference', 'Description', 'Debit', 'Credit', 'Status']
+        for col, header in enumerate(bank_headers, 1):
+            cell = ws_bank.cell(row=1, column=col, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        for row_idx, txn in enumerate(data.get('bank_transactions', []), 2):
+            ws_bank.cell(row=row_idx, column=1, value=txn.get('date', ''))
+            ws_bank.cell(row=row_idx, column=2, value=txn.get('ref', ''))
+            ws_bank.cell(row=row_idx, column=3, value=txn.get('description', ''))
+            ws_bank.cell(row=row_idx, column=4, value=txn.get('debit', 0))
+            ws_bank.cell(row=row_idx, column=5, value=txn.get('credit', 0))
+            ws_bank.cell(row=row_idx, column=6, value=txn.get('status', 'unmatched'))
+        
+        # Sales Invoices Sheet
+        ws_sales = wb.create_sheet("Sales Invoices")
+        sales_headers = ['Invoice No', 'Customer', 'Date', 'Amount', 'Status']
+        for col, header in enumerate(sales_headers, 1):
+            cell = ws_sales.cell(row=1, column=col, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        for row_idx, inv in enumerate(data.get('sales_invoices', []), 2):
+            ws_sales.cell(row=row_idx, column=1, value=inv.get('invoice_no', ''))
+            ws_sales.cell(row=row_idx, column=2, value=inv.get('customer', ''))
+            ws_sales.cell(row=row_idx, column=3, value=inv.get('date', ''))
+            ws_sales.cell(row=row_idx, column=4, value=inv.get('amount', 0))
+            ws_sales.cell(row=row_idx, column=5, value=inv.get('status', 'unpaid'))
+        
+        # Receivables Sheet
+        ws_recv = wb.create_sheet("Receivables")
+        recv_headers = ['Customer', 'Total Invoices', 'Received', 'Pending', 'Status']
+        for col, header in enumerate(recv_headers, 1):
+            cell = ws_recv.cell(row=1, column=col, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        for row_idx, recv in enumerate(data.get('receivables', []), 2):
+            ws_recv.cell(row=row_idx, column=1, value=recv.get('customer', ''))
+            ws_recv.cell(row=row_idx, column=2, value=recv.get('total_invoices', 0))
+            ws_recv.cell(row=row_idx, column=3, value=recv.get('received', 0))
+            ws_recv.cell(row=row_idx, column=4, value=recv.get('pending', 0))
+            ws_recv.cell(row=row_idx, column=5, value=recv.get('status', ''))
+        
+        # Payables Sheet
+        ws_pay = wb.create_sheet("Payables")
+        pay_headers = ['Vendor', 'Total Invoices', 'Paid', 'Pending', 'Status']
+        for col, header in enumerate(pay_headers, 1):
+            cell = ws_pay.cell(row=1, column=col, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        for row_idx, pay in enumerate(data.get('payables', []), 2):
+            ws_pay.cell(row=row_idx, column=1, value=pay.get('vendor', ''))
+            ws_pay.cell(row=row_idx, column=2, value=pay.get('total_invoices', 0))
+            ws_pay.cell(row=row_idx, column=3, value=pay.get('paid', 0))
+            ws_pay.cell(row=row_idx, column=4, value=pay.get('pending', 0))
+            ws_pay.cell(row=row_idx, column=5, value=pay.get('status', ''))
+        
+        # Set column widths
+        for ws in [ws_summary, ws_bank, ws_sales, ws_recv, ws_pay]:
+            for col in range(1, 7):
+                ws.column_dimensions[get_column_letter(col)].width = 18
+        
+        buffer = BytesIO()
+        wb.save(buffer)
+        excel_bytes = buffer.getvalue()
+        
+        period = data.get('period', {})
+        
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=Reconciliation_{period.get('from', 'report')}_{period.get('to', '')}.xlsx"}
+        )
+    except Exception as e:
+        logger.error(f"Reconciliation Excel error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include router - MUST be at the end to capture all routes
 app.include_router(api_router)
 
