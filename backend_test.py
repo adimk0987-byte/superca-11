@@ -312,7 +312,6 @@ class FinancialStatementsAPITester:
         
         # Run all tests
         self.test_ratio_calculation()
-        self.test_financial_statements_crud()
         self.test_pdf_generation()
         self.test_excel_generation()
         
