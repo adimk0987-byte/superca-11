@@ -3454,7 +3454,7 @@ Ensure debit and credit totals match (balanced trial balance). Use 0 for empty b
 
 
 # Include router
-app.include_router(api_router)
+# NOTE: router is included at the end of the file to capture all routes
 
 app.add_middleware(
     CORSMiddleware,
