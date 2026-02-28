@@ -273,7 +273,9 @@ class FinancialStatementsAPITester:
             }
             
             response = requests.post(f"{self.base_url}/financial/generate-excel", 
-                                   json=excel_data, timeout=30)
+                                   json=excel_data, 
+                                   headers=self.get_auth_headers(),
+                                   timeout=30)
             success = response.status_code == 200
             
             if success:
