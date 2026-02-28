@@ -215,7 +215,9 @@ class FinancialStatementsAPITester:
             }
             
             response = requests.post(f"{self.base_url}/financial/generate-pdf", 
-                                   json=pdf_data, timeout=30)
+                                   json=pdf_data, 
+                                   headers=self.get_auth_headers(),
+                                   timeout=30)
             success = response.status_code == 200
             
             if success:
