@@ -3705,6 +3705,9 @@ async def generate_financial_excel(data: dict, current_user: dict = Depends(get_
         logger.error(f"Excel generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Include router - MUST be at the end to capture all routes
+app.include_router(api_router)
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
