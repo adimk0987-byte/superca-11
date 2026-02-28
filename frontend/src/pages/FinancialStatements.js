@@ -1240,12 +1240,12 @@ export default function FinancialStatements() {
               
               <Tabs defaultValue="share_capital" className="w-full">
                 <TabsList className="grid grid-cols-3 md:grid-cols-6 gap-1 bg-slate-100 p-1 rounded-lg h-auto">
-                  <TabsTrigger value="share_capital" className="text-xs">Share Capital</TabsTrigger>
-                  <TabsTrigger value="reserves" className="text-xs">Reserves</TabsTrigger>
-                  <TabsTrigger value="fixed_assets" className="text-xs">Fixed Assets</TabsTrigger>
-                  <TabsTrigger value="inventory" className="text-xs">Inventory</TabsTrigger>
-                  <TabsTrigger value="debtors" className="text-xs">Debtors</TabsTrigger>
-                  <TabsTrigger value="creditors" className="text-xs">Creditors</TabsTrigger>
+                  <TabsTrigger value="share_capital" className="text-xs py-2 px-3" data-testid="tab-share-capital">Share Capital</TabsTrigger>
+                  <TabsTrigger value="reserves" className="text-xs py-2 px-3" data-testid="tab-reserves">Reserves</TabsTrigger>
+                  <TabsTrigger value="fixed_assets" className="text-xs py-2 px-3" data-testid="tab-fixed-assets">Fixed Assets</TabsTrigger>
+                  <TabsTrigger value="inventory" className="text-xs py-2 px-3" data-testid="tab-inventory">Inventory</TabsTrigger>
+                  <TabsTrigger value="debtors" className="text-xs py-2 px-3" data-testid="tab-debtors">Debtors</TabsTrigger>
+                  <TabsTrigger value="creditors" className="text-xs py-2 px-3" data-testid="tab-creditors">Creditors</TabsTrigger>
                 </TabsList>
                 
                 {/* Share Capital Tab */}
